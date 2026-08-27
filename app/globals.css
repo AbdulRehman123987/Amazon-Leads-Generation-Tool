@@ -45,3 +45,18 @@ body {
 *::-webkit-scrollbar-thumb:hover {
   background-color: #94a3b8;
 }
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-0.5rem) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.toast-enter {
+  animation: toast-in 200ms ease-out;
+}

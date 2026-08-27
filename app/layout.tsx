@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { LayoutDashboard, Search, History, Package, Building2, Megaphone, Sparkles } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
+import { ToastProvider } from "@/components/Toast";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -57,7 +58,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           </nav>
         </aside>
         <main className="min-w-0 flex-1 bg-gradient-to-b from-slate-50 to-white px-8 py-8">
-          {children}
+          <ToastProvider>{children}</ToastProvider>
         </main>
       </body>
     </html>

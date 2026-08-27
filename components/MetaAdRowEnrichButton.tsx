@@ -3,11 +3,13 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { RefreshCw } from "lucide-react";
+import { useToast } from "@/components/Toast";
 import { postJson } from "@/lib/apiClient";
 import type { StartJobResponse } from "@/lib/types";
 
 export function MetaAdRowEnrichButton({ id }: { id: string }) {
   const router = useRouter();
+  const toast = useToast();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
 
@@ -18,10 +20,12 @@ export function MetaAdRowEnrichButton({ id }: { id: string }) {
       const { jobId } = await postJson<StartJobResponse>("/api/scrape/meta-ads/enrich", {
         metaAdBrandIds: [id],
       });
+      toast.info("Looking up contact info…");
       router.push(`/jobs/${jobId}`);
-    } catch {
+    } catch (err) {
       setError(true);
       setLoading(false);
+      toast.error((err as Error).message);
     }
   }
 

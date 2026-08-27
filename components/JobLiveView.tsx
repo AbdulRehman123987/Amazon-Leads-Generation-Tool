@@ -15,6 +15,7 @@ import {
 import { Button } from "@/components/Button";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ProgressBar } from "@/components/ProgressBar";
+import { useToast } from "@/components/Toast";
 import { postJson } from "@/lib/apiClient";
 import { summarizeJobInput } from "@/lib/jobSummary";
 import type { ScrapeJobType } from "@/lib/generated/prisma/client";
@@ -46,8 +47,8 @@ export function JobLiveView({
 }) {
   const [job, setJob] = useState(initialJob);
   const [enriching, setEnriching] = useState(false);
-  const [enrichError, setEnrichError] = useState<string | null>(null);
   const router = useRouter();
+  const toast = useToast();
   const logRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -70,15 +71,15 @@ export function JobLiveView({
   }, [job.logs.length]);
 
   async function handleEnrich() {
-    setEnrichError(null);
     setEnriching(true);
     try {
       const { jobId } = await postJson<StartJobResponse>("/api/scrape/enrich", {
         jobId: job.id,
       });
+      toast.success("Brand enrichment started.");
       router.push(`/jobs/${jobId}`);
     } catch (err) {
-      setEnrichError((err as Error).message);
+      toast.error((err as Error).message);
       setEnriching(false);
     }
   }
@@ -125,13 +126,10 @@ export function JobLiveView({
             </Link>
           )}
           {job.type === "AMAZON_SEARCH" && job.status === "COMPLETED" && (
-            <>
-              <Button variant="primary" onClick={handleEnrich} disabled={enriching}>
-                <Sparkles className="h-4 w-4" />
-                {enriching ? "Starting…" : "Enrich brands for these results"}
-              </Button>
-              {enrichError && <p className="text-xs text-rose-600">{enrichError}</p>}
-            </>
+            <Button variant="primary" onClick={handleEnrich} disabled={enriching}>
+              <Sparkles className="h-4 w-4" />
+              {enriching ? "Starting…" : "Enrich brands for these results"}
+            </Button>
           )}
         </div>
       </div>

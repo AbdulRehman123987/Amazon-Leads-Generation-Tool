@@ -1,8 +1,20 @@
 "use client";
 
-import Link from "next/link";
+import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
+
+function PendingDot() {
+  const { pending } = useLinkStatus();
+  return (
+    <span
+      aria-hidden
+      className={`ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-500 transition-opacity duration-150 ${
+        pending ? "animate-pulse opacity-100" : "opacity-0"
+      }`}
+    />
+  );
+}
 
 export function NavLink({
   href,
@@ -29,6 +41,7 @@ export function NavLink({
         {icon}
       </span>
       {label}
+      <PendingDot />
     </Link>
   );
 }

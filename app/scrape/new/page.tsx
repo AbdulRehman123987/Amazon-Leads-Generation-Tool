@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Search, SlidersHorizontal, AlertCircle } from "lucide-react";
 import { Button } from "@/components/Button";
+import { useToast } from "@/components/Toast";
 import { postJson } from "@/lib/apiClient";
 import type { StartAmazonScrapeRequest, StartJobResponse } from "@/lib/types";
 
@@ -13,6 +14,7 @@ const labelClass = "text-sm font-medium text-slate-700";
 
 export default function NewScrapePage() {
   const router = useRouter();
+  const toast = useToast();
   const [keyword, setKeyword] = useState("");
   const [categoryUrl, setCategoryUrl] = useState("");
   const [maxPages, setMaxPages] = useState("2");
@@ -43,9 +45,10 @@ export default function NewScrapePage() {
 
     try {
       const { jobId } = await postJson<StartJobResponse>("/api/scrape/amazon", body);
+      toast.success("Scrape started.");
       router.push(`/jobs/${jobId}`);
     } catch (err) {
-      setError((err as Error).message);
+      toast.error((err as Error).message);
       setSubmitting(false);
     }
   }

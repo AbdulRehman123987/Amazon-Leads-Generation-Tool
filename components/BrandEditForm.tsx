@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Save, Sparkles } from "lucide-react";
 import { Button } from "@/components/Button";
+import { useToast } from "@/components/Toast";
 import { patchJson, postJson } from "@/lib/apiClient";
 import type { StartJobResponse, UpdateBrandRequest } from "@/lib/types";
 
@@ -22,18 +23,15 @@ export function BrandEditForm({
   initialPhone: string | null;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [websiteUrl, setWebsiteUrl] = useState(initialWebsiteUrl ?? "");
   const [email, setEmail] = useState(initialEmail ?? "");
   const [phone, setPhone] = useState(initialPhone ?? "");
   const [saving, setSaving] = useState(false);
   const [reEnriching, setReEnriching] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   async function handleSave() {
     setSaving(true);
-    setError(null);
-    setMessage(null);
     try {
       const body: UpdateBrandRequest = {
         websiteUrl: websiteUrl.trim() || null,
@@ -41,10 +39,10 @@ export function BrandEditForm({
         phone: phone.trim() || null,
       };
       await patchJson(`/api/brands/${brandId}`, body);
-      setMessage("Saved.");
+      toast.success("Contact details saved.");
       router.refresh();
     } catch (err) {
-      setError((err as Error).message);
+      toast.error((err as Error).message);
     } finally {
       setSaving(false);
     }
@@ -52,15 +50,14 @@ export function BrandEditForm({
 
   async function handleReEnrich() {
     setReEnriching(true);
-    setError(null);
-    setMessage(null);
     try {
       const { jobId } = await postJson<StartJobResponse>("/api/scrape/enrich", {
         brandIds: [brandId],
       });
+      toast.info("Enrichment started — watching for results.");
       router.push(`/jobs/${jobId}`);
     } catch (err) {
-      setError((err as Error).message);
+      toast.error((err as Error).message);
       setReEnriching(false);
     }
   }
@@ -74,13 +71,6 @@ export function BrandEditForm({
           {reEnriching ? "Starting…" : "Re-run enrichment"}
         </Button>
       </div>
-
-      {error && (
-        <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-          {error}
-        </div>
-      )}
-      {message && <div className="mb-4 text-sm text-emerald-600">{message}</div>}
 
       <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-1.5">

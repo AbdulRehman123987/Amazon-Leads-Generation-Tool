@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Sparkles, ArrowUpDown } from "lucide-react";
 import { Button } from "@/components/Button";
 import { ProductCard } from "@/components/ProductCard";
+import { useToast } from "@/components/Toast";
 import { postJson } from "@/lib/apiClient";
 import type { ProductRow, StartJobResponse } from "@/lib/types";
 
@@ -20,8 +21,8 @@ const SORT_OPTIONS = [
 export function ProductsGrid({ products }: { products: ProductRow[] }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [enriching, setEnriching] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const router = useRouter();
+  const toast = useToast();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
@@ -50,15 +51,15 @@ export function ProductsGrid({ products }: { products: ProductRow[] }) {
   }
 
   async function handleBulkEnrich() {
-    setError(null);
     setEnriching(true);
     try {
       const { jobId } = await postJson<StartJobResponse>("/api/scrape/enrich", {
         productIds: [...selected],
       });
+      toast.success(`Enrichment started for ${selected.size} brand${selected.size === 1 ? "" : "s"}.`);
       router.push(`/jobs/${jobId}`);
     } catch (err) {
-      setError((err as Error).message);
+      toast.error((err as Error).message);
       setEnriching(false);
     }
   }
@@ -101,8 +102,6 @@ export function ProductsGrid({ products }: { products: ProductRow[] }) {
           </Button>
         </div>
       </div>
-
-      {error && <p className="text-sm text-rose-600">{error}</p>}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {products.map((product) => (

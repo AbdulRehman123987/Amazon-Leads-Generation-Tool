@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Megaphone, AlertCircle } from "lucide-react";
 import { Button } from "@/components/Button";
+import { useToast } from "@/components/Toast";
 import { postJson } from "@/lib/apiClient";
 import type { StartJobResponse, StartMetaAdsSearchRequest } from "@/lib/types";
 
@@ -13,6 +14,7 @@ const labelClass = "text-sm font-medium text-slate-700";
 
 export default function NewAdLibrarySearchPage() {
   const router = useRouter();
+  const toast = useToast();
   const [keyword, setKeyword] = useState("");
   const [minActiveAds, setMinActiveAds] = useState("3");
   const [error, setError] = useState<string | null>(null);
@@ -35,9 +37,10 @@ export default function NewAdLibrarySearchPage() {
 
     try {
       const { jobId } = await postJson<StartJobResponse>("/api/scrape/meta-ads", body);
+      toast.success("Ad Library search started.");
       router.push(`/jobs/${jobId}`);
     } catch (err) {
-      setError((err as Error).message);
+      toast.error((err as Error).message);
       setSubmitting(false);
     }
   }
