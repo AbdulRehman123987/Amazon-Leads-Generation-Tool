@@ -61,9 +61,12 @@ export default async function AdLibraryPage({
       orderBy: { _count: { searchKeyword: "desc" } },
       take: MAX_KEYWORD_CHIPS,
     }),
-    // Unfiltered, same rule as Brand: skip a confirmed FOUND or an already-
-    // tried NOT_FOUND so the bulk button doesn't keep re-spending credits.
-    prisma.metaAdBrand.count({ where: { enrichmentStatus: { notIn: ["FOUND", "NOT_FOUND"] } } }),
+    // Unfiltered, same rule as Brand: skip FOUND, NOT_FOUND, and PARTIAL —
+    // each already checked once — so the bulk button doesn't keep
+    // re-spending credits on brands unlikely to resolve differently.
+    prisma.metaAdBrand.count({
+      where: { enrichmentStatus: { notIn: ["FOUND", "NOT_FOUND", "PARTIAL"] } },
+    }),
   ]);
 
   const rows: MetaAdBrandRow[] = brands.map((b) => ({

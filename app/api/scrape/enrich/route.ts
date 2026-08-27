@@ -25,14 +25,16 @@ export const POST = withErrorHandling(async (request: Request) => {
   let brandIds: string[];
 
   if (mode === "needs-enrichment") {
-    // Never-started, partial hits, and any brand stuck IN_PROGRESS from a
-    // crashed prior run — worth another pass. Deliberately excludes FOUND
-    // (already done) and NOT_FOUND (already tried and came back empty —
-    // repeating that automatically in every bulk run just burns scrape.do
-    // credits on brands unlikely to resolve differently). A NOT_FOUND brand
-    // can still be retried deliberately via its own "Re-run enrichment" button.
+    // Never-started, and any brand stuck IN_PROGRESS from a crashed prior
+    // run — worth another automatic pass. Deliberately excludes FOUND
+    // (already done), NOT_FOUND (already tried and came back empty), and
+    // PARTIAL (already tried and got some but not all fields) — a brand only
+    // gets checked once by the bulk sweep; repeating it automatically just
+    // burns scrape.do credits re-fetching a site whose structure hasn't
+    // changed. Any brand can still be retried deliberately, one at a time,
+    // via its own "Re-run enrichment" button.
     const needsEnrichment = await prisma.brand.findMany({
-      where: { enrichmentStatus: { notIn: ["FOUND", "NOT_FOUND"] } },
+      where: { enrichmentStatus: { notIn: ["FOUND", "NOT_FOUND", "PARTIAL"] } },
       select: { id: true },
     });
     brandIds = needsEnrichment.map((b) => b.id);

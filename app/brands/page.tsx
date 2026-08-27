@@ -53,9 +53,13 @@ export default async function BrandsPage({
     }),
     // Unfiltered — the button enriches every pending brand regardless of
     // whatever the current search/status filter happens to be showing.
-    // Matches the enrich route's "needs-enrichment" query: excludes FOUND
-    // (done) and NOT_FOUND (already tried, don't keep re-spending credits).
-    prisma.brand.count({ where: { enrichmentStatus: { notIn: ["FOUND", "NOT_FOUND"] } } }),
+    // Matches the enrich route's "needs-enrichment" query: excludes FOUND,
+    // NOT_FOUND, and PARTIAL (each already checked once — don't keep
+    // re-spending credits automatically on brands unlikely to resolve
+    // differently).
+    prisma.brand.count({
+      where: { enrichmentStatus: { notIn: ["FOUND", "NOT_FOUND", "PARTIAL"] } },
+    }),
   ]);
 
   const rows: BrandSummary[] = brands.map((brand) => ({

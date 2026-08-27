@@ -25,11 +25,14 @@ export const POST = withErrorHandling(async (request: Request) => {
   let metaAdBrandIds: string[];
 
   if (mode === "needs-enrichment") {
-    // Same credit-saving rule as Brand enrichment: never-started/partial/
-    // stuck-in-progress are worth another pass, but not a confirmed FOUND
-    // or a NOT_FOUND we already spent a Google search confirming empty.
+    // Same credit-saving rule as Brand enrichment: only never-started (or
+    // stuck-in-progress from a crashed run) gets an automatic pass. FOUND,
+    // NOT_FOUND, and PARTIAL were all already checked once — leave them out
+    // of the automatic sweep so re-running it doesn't keep re-spending
+    // credits on brands unlikely to resolve differently. Still retriable one
+    // at a time via the per-row retry icon.
     const needsEnrichment = await prisma.metaAdBrand.findMany({
-      where: { enrichmentStatus: { notIn: ["FOUND", "NOT_FOUND"] } },
+      where: { enrichmentStatus: { notIn: ["FOUND", "NOT_FOUND", "PARTIAL"] } },
       select: { id: true },
     });
     metaAdBrandIds = needsEnrichment.map((b) => b.id);
