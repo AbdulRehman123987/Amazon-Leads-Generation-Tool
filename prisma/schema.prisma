@@ -1,0 +1,168 @@
+// Prisma schema for the Amazon lead-generation scraper.
+// Provider defaults to postgresql; swapping to a hosted Postgres (Supabase/Neon)
+// only requires changing DATABASE_URL, not this file.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ScrapeJobType {
+  AMAZON_SEARCH
+  BRAND_ENRICHMENT
+  META_ADS_SEARCH
+  META_ADS_ENRICHMENT
+}
+
+enum ScrapeJobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum BrandEnrichmentStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  FOUND
+  PARTIAL
+  NOT_FOUND
+}
+
+model ScrapeJob {
+  id        String          @id @default(cuid())
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  type      ScrapeJobType
+  status    ScrapeJobStatus @default(PENDING)
+
+  // Search keyword / category URL / filters the job was started with.
+  input Json
+
+  // 0-100 percentage, derived from processedItems/totalItems.
+  progress       Int @default(0)
+  totalItems     Int @default(0)
+  processedItems Int @default(0)
+  errorCount     Int @default(0)
+
+  // Array of { timestamp, message, level } objects, appended to as the job runs.
+  logs Json @default("[]")
+
+  products     Product[]
+  metaAdBrands MetaAdBrand[]
+
+  @@index([status])
+  @@index([type])
+  @@index([createdAt])
+}
+
+model Product {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  asin        String  @unique
+  title       String
+  url         String
+  imageUrl    String?
+  price       Float?
+  currency    String?
+  reviewCount Int?
+  rating      Float?
+  bsr         Int?
+  category    String?
+
+  // Brand string as scraped from the Amazon page, before matching to a Brand row.
+  brandNameRaw String?
+
+  // Computed low-sale-volume score in [0, 1]; see lib/scoring.ts for the formula.
+  lowSaleScore Float?
+
+  scrapeJob   ScrapeJob @relation(fields: [scrapeJobId], references: [id])
+  scrapeJobId String
+
+  brand   Brand?  @relation(fields: [brandId], references: [id])
+  brandId String?
+
+  @@index([brandId])
+  @@index([scrapeJobId])
+  @@index([lowSaleScore])
+  @@index([reviewCount])
+  @@index([bsr])
+}
+
+model Brand {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Normalized (trimmed, lowercased) name used as the dedup/matching key.
+  name String @unique
+
+  // Original casing as scraped, for display.
+  displayName String
+
+  websiteUrl        String?
+  websiteConfidence Float?
+  email             String?
+  phone             String?
+  contactPageUrl    String?
+
+  enrichmentStatus BrandEnrichmentStatus @default(NOT_STARTED)
+
+  // Free-text scratchpad: search query used, candidate URLs considered, etc.
+  rawNotes String?
+
+  products Product[]
+
+  @@index([enrichmentStatus])
+}
+
+// A Facebook/Instagram Page found running ads for a searched product/keyword
+// via the Meta Ad Library (through SearchAPI.io) — a separate lead-discovery
+// funnel from the Amazon->Brand one above, not merged with Brand since the
+// identity keys differ (Meta page vs. Amazon byline brand name) and a page
+// found here isn't necessarily the same entity as an existing Brand row.
+model MetaAdBrand {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  pageId             String
+  pageName           String
+  pageProfileUri     String?
+  pageProfilePicture String?
+  pageLikeCount      Int?
+  pageCategory       String?
+
+  // The product/keyword this was found under, and how many currently-active
+  // ads matched it — re-searching the same keyword updates this row rather
+  // than duplicating it, since ad counts are a live snapshot, not history.
+  searchKeyword   String
+  activeAdCount   Int
+  sampleAdSnippet String?
+
+  // Contact enrichment — same fields/semantics as Brand, found via the same
+  // lib/enrichment/findContactInfo.ts pipeline (website discovery + email/
+  // phone extraction), just keyed off the Page name instead of an Amazon
+  // byline brand name.
+  websiteUrl        String?
+  websiteConfidence Float?
+  email             String?
+  phone             String?
+  contactPageUrl    String?
+  enrichmentStatus  BrandEnrichmentStatus @default(NOT_STARTED)
+  rawNotes          String?
+
+  scrapeJob   ScrapeJob @relation(fields: [scrapeJobId], references: [id])
+  scrapeJobId String
+
+  @@unique([pageId, searchKeyword])
+  @@index([activeAdCount])
+  @@index([searchKeyword])
+  @@index([enrichmentStatus])
+}
