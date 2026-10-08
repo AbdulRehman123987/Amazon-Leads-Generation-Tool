@@ -1,7 +1,7 @@
 # Amazon Lead Scraper
 
 Finds low-performing Amazon products, identifies their brand, discovers the
-brand's company website via Google, and extracts a contact email/phone —
+brand's company website via a web search, and extracts a contact email/phone —
 building a lead list for outreach.
 
 ## Stack
@@ -10,7 +10,7 @@ building a lead list for outreach.
 - Prisma ORM + PostgreSQL — works with any Postgres-compatible provider (local
   Postgres, Supabase, Neon) via `DATABASE_URL`
 - Tailwind CSS
-- All outbound fetching (Amazon pages, Google search pages, brand websites)
+- All outbound fetching (Amazon pages, search-engine pages, brand websites)
   goes through [scrape.do](https://scrape.do) via `lib/scrapeDo.ts`
 - Background jobs: an in-process job runner (no Redis/queue service) with
   progress persisted to the `ScrapeJob` table and polled by the UI
@@ -67,14 +67,32 @@ both are known they're blended 50/50. All the constants above live at the top
 of `lib/scoring.ts` — edit them directly to tune how aggressively a product
 counts as "low sale".
 
-## Amazon/Google selectors — not verified against live output
+## Parsing is checked against live output — but these sites change
 
-`lib/amazon/selectors.ts` and `lib/enrichment/googleSearch.ts` were written
-from general knowledge of Amazon's and Google's markup, not a real scrape.do
-response — both sites vary their DOM by category, locale, and A/B test. Each
-field lists fallback selectors tried in order (see the confidence notes in
-`lib/amazon/selectors.ts`); if a scrape comes back with a field empty or
-wrong, that selector list is the place to fix it.
+`lib/amazon/selectors.ts` (Amazon), `lib/enrichment/bingSearch.ts` and
+`lib/enrichment/googleSearch.ts` (search results) were all verified against
+real scrape.do responses. They still break when a site changes its markup, so
+if a field comes back empty or wrong, those are the files to fix (Amazon lists
+fallback selectors tried in order). One quirk worth knowing: Google often
+serves result links as opaque `/goto?url=<token>` redirects, so the
+destination is read from the URL printed under each title (`<cite>`).
+
+## Finding a brand's website
+
+`lib/enrichment/findContactInfo.ts`, in order, stopping at the first success:
+
+1. **Domain guess** — fetch `<brandname>.com` (1 credit). Accepted only if the
+   page isn't a parked/for-sale domain and mentions the brand name in its own
+   text (`lib/enrichment/siteCheck.ts`).
+2. **Bing search** — 1 credit. A result is only picked if its domain contains
+   at least half of the brand-name words (`lib/enrichment/pickWebsite.ts`), so
+   an unrelated top result is never saved as the brand's site.
+3. **Google search** — 10 credits, rendered. Only used when Bing's page can't be
+   read at all (blocked/changed), not when Bing simply finds nothing.
+
+Placeholder brands ("Generic", "Unbranded"...) are skipped without spending
+credits. If scrape.do can't be reached mid-lookup the brand stays
+`NOT_STARTED` (not `NOT_FOUND`), so the next "Enrich pending brands" retries it.
 
 ## Ad Library (Meta ads) search
 
@@ -98,8 +116,8 @@ Same idea as Amazon->Brand enrichment, applied to `MetaAdBrand` rows: from
 `/ad-library`, "Enrich pending brands" (bulk) or the per-row retry icon starts
 a `META_ADS_ENRICHMENT` job that looks up each Page's website, email, and
 phone. It reuses the exact same pipeline as Brand enrichment —
-`lib/enrichment/findContactInfo.ts` (domain guessing, Google-search fallback,
-contact-page crawl) — keyed off the Page name instead of an Amazon byline
+`lib/enrichment/findContactInfo.ts` (domain guessing, Bing search with a Google
+fallback, contact-page crawl) — keyed off the Page name instead of an Amazon byline
 brand name, and writes to the same `websiteUrl`/`email`/`phone`/
 `enrichmentStatus` shape. The bulk button and the `needs-enrichment` job mode
 both skip brands already `FOUND` or `NOT_FOUND` for the same reason as Brand
@@ -122,11 +140,11 @@ source. To wire it up:
 ## Project structure
 
 - `prisma/schema.prisma` — `ScrapeJob`, `Product`, `Brand`, `MetaAdBrand` models
-- `lib/scrapeDo.ts` — the single scrape.do client wrapper (both Amazon and
-  Google fetches go through this)
+- `lib/scrapeDo.ts` — the single scrape.do client wrapper (Amazon, search and
+  brand-site fetches all go through this)
 - `lib/searchApi.ts` — the single SearchAPI.io client wrapper (Meta Ad Library)
 - `lib/amazon/` — search-results/product-page parsing + the search job runner
-- `lib/enrichment/` — Google search parsing, website-candidate scoring,
+- `lib/enrichment/` — Bing/Google search parsing, website-candidate scoring,
   contact extraction, and the enrichment job runners for both `Brand` and
   `MetaAdBrand` (shared discovery logic lives in `findContactInfo.ts`)
 - `lib/metaAds/` — the Ad Library search job runner and the Ad Library
@@ -136,7 +154,10 @@ source. To wire it up:
 - `app/api/scrape/amazon`, `app/api/scrape/enrich`, `app/api/scrape/meta-ads`,
   `app/api/scrape/meta-ads/enrich` — start a job
 - `app/api/jobs/[id]` — polled by the job detail page while it runs
-- `app/api/export/{products,brands,meta-ads}` — CSV export of the current filtered view
+- `app/api/export/{products,meta-ads}` — CSV export of the current filtered view
+- `app/api/export/brands` (POST) — CSV of Found/Partial brands only (Not found is never
+  exported). Skips brands exported before unless `includeExported` is set, and marks what
+  it exports (`Brand.exportedAt`)
 
 ## Deploying
 

@@ -7,6 +7,12 @@ import { Button } from "@/components/Button";
 
 const STATUS_OPTIONS = ["NOT_STARTED", "IN_PROGRESS", "FOUND", "PARTIAL", "NOT_FOUND"];
 
+const EXPORTED_OPTIONS = [
+  { value: "", label: "Any" },
+  { value: "no", label: "Not exported yet" },
+  { value: "yes", label: "Already exported" },
+];
+
 const inputClass =
   "rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 transition-colors focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100";
 
@@ -17,12 +23,14 @@ export function BrandsFilterBar() {
 
   const [q, setQ] = useState(searchParams.get("q") ?? "");
   const [status, setStatus] = useState(searchParams.get("status") ?? "");
+  const [exported, setExported] = useState(searchParams.get("exported") ?? "");
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
     const params = new URLSearchParams();
     if (q.trim()) params.set("q", q.trim());
     if (status) params.set("status", status);
+    if (exported) params.set("exported", exported);
     router.push(params.toString() ? `${pathname}?${params.toString()}` : pathname);
   }
 
@@ -42,6 +50,16 @@ export function BrandsFilterBar() {
           {STATUS_OPTIONS.map((option) => (
             <option key={option} value={option}>
               {option.replace(/_/g, " ")}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="flex flex-col gap-1">
+        <label className="text-xs font-medium text-slate-500">Exported</label>
+        <select className={inputClass} value={exported} onChange={(e) => setExported(e.target.value)}>
+          {EXPORTED_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
             </option>
           ))}
         </select>

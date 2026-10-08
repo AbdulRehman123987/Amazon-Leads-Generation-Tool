@@ -138,9 +138,20 @@ export interface BrandSummary {
   websiteUrl: string | null;
   email: string | null;
   phone: string | null;
+  /** The brand's strongest-lead product listing; null if it has no products. */
+  productUrl: string | null;
   enrichmentStatus: BrandEnrichmentStatus;
   productCount: number;
+  /** When the brand last went out in a CSV export; null = never exported. */
+  exportedAt: string | null;
   updatedAt: string;
+}
+
+export interface ExportBrandsRequest {
+  q?: string;
+  status?: string;
+  /** Re-export brands that already went out before. Default: skip them. */
+  includeExported?: boolean;
 }
 
 export interface MetaAdBrandRow {

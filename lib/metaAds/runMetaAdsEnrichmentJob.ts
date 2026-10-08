@@ -19,7 +19,7 @@ async function enrichMetaAdBrand(jobId: string, brand: MetaAdBrand): Promise<voi
       email: result.email,
       phone: result.phone,
       contactPageUrl: result.contactPageUrl,
-      enrichmentStatus: computeEnrichmentStatus(result.websiteUrl, result.email),
+      enrichmentStatus: computeEnrichmentStatus(result.websiteUrl, result.email, result.incomplete),
       rawNotes: result.notes.join("\n"),
     },
   });

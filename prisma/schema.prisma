@@ -117,6 +117,10 @@ model Brand {
   // Free-text scratchpad: search query used, candidate URLs considered, etc.
   rawNotes String?
 
+  // Set when the brand last went out in a CSV export, so the next export can
+  // skip it. Null = never exported.
+  exportedAt DateTime?
+
   products Product[]
 
   @@index([enrichmentStatus])

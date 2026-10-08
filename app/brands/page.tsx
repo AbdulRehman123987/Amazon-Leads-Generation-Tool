@@ -1,9 +1,11 @@
 import Link from "next/link";
-import { Download, Building2, Globe, Mail, Phone } from "lucide-react";
+import { Building2, Check, ExternalLink, Globe, Mail, Phone } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { BrandEnrichmentStatus, type Prisma } from "@/lib/generated/prisma/client";
+import { brandExportWhere, brandNameWhere, primaryProductArgs } from "@/lib/brands";
 import { BrandsFilterBar } from "@/components/BrandsFilterBar";
 import { EnrichAllButton } from "@/components/EnrichAllButton";
+import { ExportBrandsButton } from "@/components/ExportBrandsButton";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Pagination } from "@/components/Pagination";
 import { avatarColorFor } from "@/lib/avatarColor";
@@ -28,28 +30,25 @@ export default async function BrandsPage({
   const q = get("q");
   const statusRaw = get("status");
   const status = VALID_STATUSES.has(statusRaw) ? (statusRaw as BrandEnrichmentStatus) : undefined;
+  const exportedRaw = get("exported");
+  const exported = exportedRaw === "no" || exportedRaw === "yes" ? exportedRaw : "";
   const page = Math.max(1, parseInt(get("page") || "1", 10) || 1);
 
   const where: Prisma.BrandWhereInput = {
-    ...(q
-      ? {
-          OR: [
-            { displayName: { contains: q, mode: "insensitive" } },
-            { name: { contains: q.toLowerCase(), mode: "insensitive" } },
-          ],
-        }
-      : {}),
+    ...brandNameWhere(q),
     ...(status ? { enrichmentStatus: status } : {}),
+    ...(exported === "no" ? { exportedAt: null } : {}),
+    ...(exported === "yes" ? { exportedAt: { not: null } } : {}),
   };
 
-  const [total, brands, needsEnrichmentCount] = await Promise.all([
+  const [total, brands, needsEnrichmentCount, exportNewCount, exportAllCount] = await Promise.all([
     prisma.brand.count({ where }),
     prisma.brand.findMany({
       where,
       orderBy: { updatedAt: "desc" },
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
-      include: { _count: { select: { products: true } } },
+      include: { _count: { select: { products: true } }, products: primaryProductArgs },
     }),
     // Unfiltered — the button enriches every pending brand regardless of
     // whatever the current search/status filter happens to be showing.
@@ -60,6 +59,10 @@ export default async function BrandsPage({
     prisma.brand.count({
       where: { enrichmentStatus: { notIn: ["FOUND", "NOT_FOUND", "PARTIAL"] } },
     }),
+    // What Export CSV would contain for the current search/status: Found and
+    // Partial brands only, without and with the already-exported ones.
+    prisma.brand.count({ where: brandExportWhere({ q, status, includeExported: false }) }),
+    prisma.brand.count({ where: brandExportWhere({ q, status, includeExported: true }) }),
   ]);
 
   const rows: BrandSummary[] = brands.map((brand) => ({
@@ -69,17 +72,20 @@ export default async function BrandsPage({
     websiteUrl: brand.websiteUrl,
     email: brand.email,
     phone: brand.phone,
+    productUrl: brand.products[0]?.url ?? null,
     enrichmentStatus: brand.enrichmentStatus,
     productCount: brand._count.products,
+    exportedAt: brand.exportedAt?.toISOString() ?? null,
     updatedAt: brand.updatedAt.toISOString(),
   }));
 
-  const exportParams = new URLSearchParams();
-  if (q) exportParams.set("q", q);
-  if (status) exportParams.set("status", status);
+  const filterParams = new URLSearchParams();
+  if (q) filterParams.set("q", q);
+  if (status) filterParams.set("status", status);
+  if (exported) filterParams.set("exported", exported);
 
   function buildPageHref(nextPage: number) {
-    const p = new URLSearchParams(exportParams);
+    const p = new URLSearchParams(filterParams);
     if (nextPage > 1) p.set("page", String(nextPage));
     return `/brands?${p.toString()}`;
   }
@@ -92,13 +98,12 @@ export default async function BrandsPage({
           <p className="mt-1 text-sm text-slate-500">{total} brand(s) discovered</p>
         </div>
         <div className="flex items-center gap-3">
-          <a
-            href={`/api/export/brands?${exportParams.toString()}`}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50"
-          >
-            <Download className="h-4 w-4" />
-            Export CSV
-          </a>
+          <ExportBrandsButton
+            q={q}
+            status={status ?? ""}
+            newCount={exportNewCount}
+            allCount={exportAllCount}
+          />
           <EnrichAllButton count={needsEnrichmentCount} endpoint="/api/scrape/enrich" />
         </div>
       </div>
@@ -112,7 +117,7 @@ export default async function BrandsPage({
         </div>
       ) : (
         <>
-          <div className="overflow-hidden rounded-2xl border border-slate-200/70 bg-white shadow-sm shadow-slate-200/50">
+          <div className="overflow-x-auto rounded-2xl border border-slate-200/70 bg-white shadow-sm shadow-slate-200/50">
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr className="text-left text-xs font-medium text-slate-400">
@@ -120,6 +125,7 @@ export default async function BrandsPage({
                   <th className="px-6 py-3 font-medium">Website</th>
                   <th className="px-6 py-3 font-medium">Email</th>
                   <th className="px-6 py-3 font-medium">Phone</th>
+                  <th className="px-6 py-3 font-medium">Product URL</th>
                   <th className="px-6 py-3 font-medium">Status</th>
                   <th className="px-6 py-3 font-medium">Products</th>
                   <th className="px-6 py-3 font-medium">Updated</th>
@@ -176,7 +182,36 @@ export default async function BrandsPage({
                       )}
                     </td>
                     <td className="px-6 py-3.5">
-                      <StatusBadge status={brand.enrichmentStatus} />
+                      {brand.productUrl ? (
+                        <a
+                          href={brand.productUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title={brand.productUrl}
+                          className="inline-flex max-w-[200px] items-center gap-1.5 font-mono text-xs text-indigo-600 hover:underline"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                          <span className="truncate">
+                            {brand.productUrl.replace(/^https?:\/\/(www\.)?/, "").replace(/[?#].*$/, "")}
+                          </span>
+                        </a>
+                      ) : (
+                        <span className="text-slate-300">—</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-3.5">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <StatusBadge status={brand.enrichmentStatus} />
+                        {brand.exportedAt && (
+                          <span
+                            title={`Exported ${new Date(brand.exportedAt).toLocaleString()}`}
+                            className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-500"
+                          >
+                            <Check className="h-3 w-3" />
+                            Exported
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-3.5 tabular-nums text-slate-600">{brand.productCount}</td>
                     <td className="px-6 py-3.5 text-slate-500">

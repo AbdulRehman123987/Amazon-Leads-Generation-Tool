@@ -7,7 +7,21 @@
 
 const SCRAPE_DO_BASE_URL = "https://api.scrape.do/";
 const DEFAULT_TIMEOUT_MS = 60_000;
-const MAX_ATTEMPTS = 2;
+const MAX_ATTEMPTS = 3;
+
+// Errors raised while still connecting to scrape.do — it never saw the
+// request, so nothing was billed and retrying is safe.
+const CONNECT_ERROR_CODES = new Set([
+  "UND_ERR_CONNECT_TIMEOUT",
+  "ECONNREFUSED",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "ETIMEDOUT",
+]);
+
+function errorCauseCode(err: unknown): string | undefined {
+  return (err as { cause?: { code?: string } } | null)?.cause?.code;
+}
 
 export interface ScrapeDoOptions {
   /** Render with a headless browser — needed for JS-heavy / bot-gated pages. */
@@ -57,7 +71,8 @@ function parseNumericHeader(value: string | null): number | undefined {
 
 /**
  * Fetches `targetUrl` through scrape.do and returns the target page's HTML.
- * Retries once on a scrape.do-side 502 (their documented "please retry" signal).
+ * Retries on a scrape.do-side 502 (their documented "please retry" signal)
+ * and on connections to scrape.do that never established (flaky networks).
  */
 export async function scrapeDoFetch(
   targetUrl: string,
@@ -100,10 +115,15 @@ export async function scrapeDoFetch(
     } catch (err) {
       clearTimeout(clientTimer);
       const isAbort = err instanceof Error && err.name === "AbortError";
+      const causeCode = isAbort ? undefined : errorCauseCode(err);
+      if (causeCode && CONNECT_ERROR_CODES.has(causeCode) && attempt < MAX_ATTEMPTS) {
+        await sleep(1000 * attempt);
+        continue;
+      }
       throw new ScrapeDoError(
         isAbort
           ? `scrape.do request timed out after ${timeoutMs + 15_000}ms fetching ${targetUrl}`
-          : `scrape.do request failed for ${targetUrl}: ${(err as Error).message}`,
+          : `scrape.do request failed for ${targetUrl}: ${(err as Error).message}${causeCode ? ` (${causeCode})` : ""}`,
         0
       );
     }

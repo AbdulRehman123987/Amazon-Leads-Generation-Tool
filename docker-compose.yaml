@@ -7,11 +7,12 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-mydb}
-    # Not published to the host on purpose — the app reaches it over the
-    # internal Docker network as `db:5432`. Uncomment only for a temporary
-    # local psql connection, and never on a public-facing VPS.
-    # ports:
-    #   - "5432:5432"
+    # Bound to loopback only so `npm run dev` on the host can reach it at
+    # localhost:5432 — still unreachable from the network/internet. The `app`
+    # container talks to it over the internal Docker network as `db:5432`.
+    # Never change this to a bare "5432:5432" on a public-facing VPS.
+    ports:
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
