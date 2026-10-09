@@ -166,3 +166,24 @@ scrape/enrichment loop past the point the HTTP response is sent) needs a
 persistent Node.js process — a self-hosted `next start` or a Docker container.
 On a serverless platform with a short function-execution limit, a scrape job
 spanning many pages/products could be killed mid-run.
+
+### Docker on a VPS, with Supabase as the database
+
+1. Create a Supabase project and put its **Session pooler** URI (Connect ->
+   Session pooler, port 5432, your database password filled in) in `.env` as
+   `DATABASE_URL`. Don't add `sslmode=` — `lib/db.ts` switches SSL on for
+   Supabase hosts itself (Supabase's certificate isn't in Node's trust store,
+   so the chain isn't verified).
+2. Create the tables once with `npx prisma migrate deploy` (the Docker
+   entrypoint also runs it on every start).
+3. On the VPS, put the same `.env` next to the code and run
+   `docker compose up -d --build`. Only the app starts; it uses Supabase.
+
+Notes:
+
+- `docker compose --profile local-db up -d --build` starts a bundled Postgres
+  instead (set `DATABASE_URL=postgresql://postgres:postgres@db:5432/mydb`).
+- A migration turns on row level security for every table so Supabase's public
+  REST API can't read the leads. The app connects directly as the tables' owner
+  and is unaffected. Do the same for any table you add later.
+- Free Supabase projects pause after about a week without activity.
