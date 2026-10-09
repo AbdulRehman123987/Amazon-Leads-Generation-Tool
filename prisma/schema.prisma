@@ -33,6 +33,20 @@ enum BrandEnrichmentStatus {
   NOT_FOUND
 }
 
+// Team members who can sign in. There is no sign-up form: an admin creates
+// accounts with `npm run user -- create <email>` (see scripts/users.mjs).
+model User {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Stored trimmed and lowercased.
+  email String @unique
+
+  // scrypt hash (see lib/auth/password.ts) — never the password itself.
+  passwordHash String
+}
+
 model ScrapeJob {
   id        String          @id @default(cuid())
   createdAt DateTime        @default(now())

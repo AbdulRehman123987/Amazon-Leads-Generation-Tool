@@ -159,6 +159,44 @@ source. To wire it up:
   exported). Skips brands exported before unless `includeExported` is set, and marks what
   it exports (`Brand.exportedAt`)
 
+## Login
+
+Every page and API route needs a signed-in user: `proxy.ts` checks a signed
+session cookie on every request, and `lib/auth/currentUser.ts` also confirms the
+account still exists. There is no sign-up form — an admin creates accounts with
+`scripts/users.mjs`:
+
+```
+npm run user -- create alice@company.com      # generates a password, shown once
+npm run user -- create bob@company.com 'ChosenPass1'
+npm run user -- password alice@company.com    # reset (generates a new one)
+npm run user -- delete alice@company.com      # locked out within ~30 seconds
+npm run user -- list
+npm run user -- secret                        # a new AUTH_SECRET for .env
+```
+
+`AUTH_SECRET` (32+ random characters in `.env`) signs the session cookies;
+sessions last 7 days. Five wrong passwords lock that email out for 15 minutes.
+Behind HTTPS (a reverse proxy), make sure it forwards `X-Forwarded-Proto` so the
+cookie is marked `Secure` (Caddy and nginx's usual setups do).
+
+## Portable zip for the team (Windows)
+
+`npm run package` builds `dist\lead-scraper-portable.zip`: the production build,
+a copy of the installed `node.exe`, a filtered copy of `.env`, and `start.bat`.
+A teammate unzips it and double-clicks `start.bat` — no Node, Docker or editor
+to install — then signs in with an account made above. The app listens on
+`127.0.0.1:3210` only, and every copy shares the same Supabase database.
+
+- The zip contains the database password and API keys (`.env`): share it inside
+  the team only, and rotate them when someone leaves. Since every PC holds
+  them, the login keeps casual users out but is not a hard boundary against a
+  technical teammate — that needs the app on a server instead.
+- Scrapes run inside each PC's `start.bat` window, so that PC must stay on, and
+  everyone shares one scrape.do credit pool.
+- After a schema change run `npx prisma migrate deploy` yourself, then build and
+  share a new zip.
+
 ## Deploying
 
 The background-job design (`after()` in the API routes, running the actual
@@ -169,11 +207,17 @@ spanning many pages/products could be killed mid-run.
 
 ### Docker on a VPS, with Supabase as the database
 
-1. Create a Supabase project and put its **Session pooler** URI (Connect ->
-   Session pooler, port 5432, your database password filled in) in `.env` as
-   `DATABASE_URL`. Don't add `sslmode=` — `lib/db.ts` switches SSL on for
-   Supabase hosts itself (Supabase's certificate isn't in Node's trust store,
-   so the chain isn't verified).
+1. Create a Supabase project and put two of its URIs in `.env` (Connect), with
+   your database password filled in:
+   - `DATABASE_URL` = the **Transaction pooler** (port 6543) — what the app
+     uses. It shares the project's small connection limit between many copies
+     of the app (each team member's PC, the VPS...).
+   - `DIRECT_URL` = the **Session pooler** (port 5432) — used only for
+     migrations, which need a real session.
+
+   Don't add `sslmode=` — `lib/db.ts` switches SSL on for Supabase hosts itself
+   (Supabase's certificate isn't in Node's trust store, so the chain isn't
+   verified).
 2. Create the tables once with `npx prisma migrate deploy` (the Docker
    entrypoint also runs it on every start).
 3. On the VPS, put the same `.env` next to the code and run
