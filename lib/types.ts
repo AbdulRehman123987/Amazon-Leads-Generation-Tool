@@ -8,6 +8,7 @@ import type {
   ScrapeJobStatus,
   ScrapeJobType,
 } from "@/lib/generated/prisma/client";
+import type { MarketplaceCode } from "@/lib/amazon/marketplaces";
 
 export interface JobLogEntry {
   timestamp: string; // ISO 8601
@@ -16,6 +17,8 @@ export interface JobLogEntry {
 }
 
 export interface AmazonSearchInput {
+  /** Which Amazon site to scrape; jobs started before this existed have none and mean the US. */
+  marketplace?: MarketplaceCode;
   keyword?: string;
   categoryUrl?: string;
   maxPages: number;
@@ -42,6 +45,8 @@ export interface MetaAdsEnrichmentInput {
 // ---- API request bodies ----
 
 export interface StartAmazonScrapeRequest {
+  /** "US" (amazon.com, the default) or "UK" (amazon.co.uk). */
+  marketplace?: string;
   keyword?: string;
   categoryUrl?: string;
   maxPages?: number;
@@ -105,6 +110,7 @@ export interface JobDetail extends JobSummary {
 export interface ProductRow {
   id: string;
   asin: string;
+  marketplace: MarketplaceCode;
   title: string;
   url: string;
   imageUrl: string | null;

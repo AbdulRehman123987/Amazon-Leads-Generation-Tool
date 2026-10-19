@@ -77,6 +77,22 @@ fallback selectors tried in order). One quirk worth knowing: Google often
 serves result links as opaque `/goto?url=<token>` redirects, so the
 destination is read from the URL printed under each title (`<cite>`).
 
+## Amazon marketplaces (US / UK)
+
+"New Scrape" starts with a **Marketplace** choice: United States (`amazon.com`)
+or United Kingdom (`amazon.co.uk`). It decides the search URL and the product
+URLs that get saved, and for the UK scrape.do fetches with `geoCode=gb` so pages
+look as they do to a UK shopper (prices in £). A pasted category URL must belong
+to the chosen marketplace (the form switches the choice for you when you paste
+one). Products remember their marketplace (`Product.marketplace`): the same ASIN
+on both sites is two separate rows, and the Products page can filter by it.
+Brands are shared across marketplaces.
+
+To add another site (say `amazon.de`): add it to `lib/amazon/marketplaces.ts`,
+add the value to the `AmazonMarketplace` enum in `prisma/schema.prisma` with a
+migration, and check the selectors in `lib/amazon/selectors.ts` against a saved
+page of that site (they were verified on amazon.com and amazon.co.uk).
+
 ## Finding a brand's website
 
 `lib/enrichment/findContactInfo.ts`, in order, stopping at the first success:

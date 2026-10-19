@@ -74,12 +74,23 @@ model ScrapeJob {
   @@index([createdAt])
 }
 
+// Which Amazon site a product was scraped from (see lib/amazon/marketplaces.ts).
+enum AmazonMarketplace {
+  US // amazon.com
+  UK // amazon.co.uk
+}
+
 model Product {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  asin        String  @unique
+  asin String
+
+  // The same ASIN is often sold on several Amazon sites with different prices,
+  // ranks and reviews, so an ASIN is only unique within one marketplace.
+  marketplace AmazonMarketplace @default(US)
+
   title       String
   url         String
   imageUrl    String?
@@ -102,6 +113,8 @@ model Product {
   brand   Brand?  @relation(fields: [brandId], references: [id])
   brandId String?
 
+  @@unique([asin, marketplace])
+  @@index([marketplace])
   @@index([brandId])
   @@index([scrapeJobId])
   @@index([lowSaleScore])

@@ -2,16 +2,20 @@
 // lib/jobs.ts (which imports lib/db.ts, a server-only module) so this file
 // can be safely imported from Client Components too.
 import type { ScrapeJobType } from "@/lib/generated/prisma/client";
+import { DEFAULT_MARKETPLACE, parseMarketplace } from "@/lib/amazon/marketplaces";
 
 /** Short human-readable description of what a job was for — "wireless mouse", "3 brands", etc. */
 export function summarizeJobInput(job: { type: ScrapeJobType; input: unknown }): string {
   const input = job.input as Record<string, unknown> | null;
   if (job.type === "AMAZON_SEARCH") {
+    // Only flagged when it isn't the default marketplace, so existing US labels stay as they were.
+    const marketplace = parseMarketplace(input?.marketplace);
+    const suffix = marketplace && marketplace !== DEFAULT_MARKETPLACE ? ` (${marketplace})` : "";
     const keyword = typeof input?.keyword === "string" ? input.keyword : null;
-    if (keyword) return keyword;
+    if (keyword) return keyword + suffix;
     const categoryUrl = typeof input?.categoryUrl === "string" ? input.categoryUrl : null;
-    if (categoryUrl) return "category URL";
-    return "Amazon search";
+    if (categoryUrl) return "category URL" + suffix;
+    return "Amazon search" + suffix;
   }
   if (job.type === "META_ADS_SEARCH") {
     const keyword = typeof input?.keyword === "string" ? input.keyword : null;

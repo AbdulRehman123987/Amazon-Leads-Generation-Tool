@@ -3,6 +3,12 @@ import { after } from "next/server";
 import { createScrapeJob } from "@/lib/jobs";
 import { runAmazonSearchJob } from "@/lib/amazon/runSearchJob";
 import { withErrorHandling } from "@/lib/apiHandler";
+import {
+  DEFAULT_MARKETPLACE,
+  MARKETPLACES,
+  marketplaceFromUrl,
+  parseMarketplace,
+} from "@/lib/amazon/marketplaces";
 import type { Prisma } from "@/lib/generated/prisma/client";
 import type {
   AmazonSearchInput,
@@ -40,15 +46,30 @@ export const POST = withErrorHandling(async (request: Request) => {
     return NextResponse.json(error, { status: 400 });
   }
 
+  const marketplace =
+    body.marketplace == null || body.marketplace === ""
+      ? DEFAULT_MARKETPLACE
+      : parseMarketplace(body.marketplace);
+  if (!marketplace) {
+    const error: ApiErrorResponse = { error: "Marketplace must be US or UK" };
+    return NextResponse.json(error, { status: 400 });
+  }
+  const site = MARKETPLACES[marketplace];
+
   if (categoryUrl) {
     try {
-      const parsed = new URL(categoryUrl);
-      if (!parsed.hostname.endsWith("amazon.com")) {
-        const error: ApiErrorResponse = { error: "Category URL must be an amazon.com URL" };
-        return NextResponse.json(error, { status: 400 });
-      }
+      new URL(categoryUrl);
     } catch {
       const error: ApiErrorResponse = { error: "Category URL is not a valid URL" };
+      return NextResponse.json(error, { status: 400 });
+    }
+    const urlMarketplace = marketplaceFromUrl(categoryUrl);
+    if (urlMarketplace !== marketplace) {
+      const error: ApiErrorResponse = {
+        error: urlMarketplace
+          ? `That is an ${MARKETPLACES[urlMarketplace].domain} link, but the marketplace is ${site.label} (${site.domain}). Switch the marketplace or use an ${site.domain} URL.`
+          : `Category URL must be an ${site.domain} URL`,
+      };
       return NextResponse.json(error, { status: 400 });
     }
   }
@@ -64,6 +85,7 @@ export const POST = withErrorHandling(async (request: Request) => {
   }
 
   const input: AmazonSearchInput = {
+    marketplace,
     maxPages,
     ...(keyword ? { keyword } : {}),
     ...(categoryUrl ? { categoryUrl } : {}),

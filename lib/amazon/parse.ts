@@ -1,5 +1,6 @@
 import * as cheerio from "cheerio";
 import * as sel from "./selectors";
+import { DEFAULT_MARKETPLACE, MARKETPLACES, marketplaceHost, type MarketplaceCode } from "./marketplaces";
 
 export interface RawAmazonSearchItem {
   asin: string;
@@ -65,14 +66,17 @@ function findDetailTableValue($: CheerioRoot, rowSelectors: string[], label: str
   return result;
 }
 
-function parsePrice(text: string | null): { price: number | null; currency: string | null } {
+function parsePrice(
+  text: string | null,
+  fallbackCurrency: string
+): { price: number | null; currency: string | null } {
   if (!text) return { price: null, currency: null };
   const match = text.match(/([^\d\s.,]+)?\s*([\d,]+(?:\.\d+)?)/);
   if (!match) return { price: null, currency: null };
   const price = parseFloat(match[2].replace(/,/g, ""));
   return {
     price: Number.isFinite(price) ? price : null,
-    currency: match[1]?.trim() || "$",
+    currency: match[1]?.trim() || fallbackCurrency,
   };
 }
 
@@ -93,7 +97,10 @@ function parseReviewCount(text: string | null): number | null {
 }
 
 /** Parses one Amazon search-results page into raw per-result stubs. */
-export function parseAmazonSearchResults(html: string): RawAmazonSearchItem[] {
+export function parseAmazonSearchResults(
+  html: string,
+  marketplace: MarketplaceCode = DEFAULT_MARKETPLACE
+): RawAmazonSearchItem[] {
   const $ = cheerio.load(html);
   const items: RawAmazonSearchItem[] = [];
 
@@ -105,7 +112,10 @@ export function parseAmazonSearchResults(html: string): RawAmazonSearchItem[] {
     const title = firstTextWithin(card, sel.SEARCH_RESULT_TITLE);
     if (!title) return; // unrecognized card layout — nothing usable to store
 
-    const { price, currency } = parsePrice(firstTextWithin(card, sel.SEARCH_RESULT_PRICE));
+    const { price, currency } = parsePrice(
+      firstTextWithin(card, sel.SEARCH_RESULT_PRICE),
+      MARKETPLACES[marketplace].currency
+    );
     const rating = parseRating(firstTextWithin(card, sel.SEARCH_RESULT_RATING));
     const reviewCount = parseReviewCount(
       firstAttrWithin(card, sel.SEARCH_RESULT_REVIEW_COUNT, "aria-label")
@@ -117,7 +127,7 @@ export function parseAmazonSearchResults(html: string): RawAmazonSearchItem[] {
       title,
       // Built from the ASIN rather than the scraped <a href>, which usually
       // carries sponsored-click tracking query params we don't want to store.
-      url: `https://www.amazon.com/dp/${asin}`,
+      url: `https://${marketplaceHost(marketplace)}/dp/${asin}`,
       imageUrl,
       price,
       currency,

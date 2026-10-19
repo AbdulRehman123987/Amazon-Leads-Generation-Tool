@@ -6,6 +6,13 @@ import { Search, SlidersHorizontal, AlertCircle } from "lucide-react";
 import { Button } from "@/components/Button";
 import { useToast } from "@/components/Toast";
 import { postJson } from "@/lib/apiClient";
+import {
+  DEFAULT_MARKETPLACE,
+  MARKETPLACES,
+  MARKETPLACE_CODES,
+  marketplaceFromUrl,
+  type MarketplaceCode,
+} from "@/lib/amazon/marketplaces";
 import type { StartAmazonScrapeRequest, StartJobResponse } from "@/lib/types";
 
 const inputClass =
@@ -15,6 +22,7 @@ const labelClass = "text-sm font-medium text-slate-700";
 export default function NewScrapePage() {
   const router = useRouter();
   const toast = useToast();
+  const [marketplace, setMarketplace] = useState<MarketplaceCode>(DEFAULT_MARKETPLACE);
   const [keyword, setKeyword] = useState("");
   const [categoryUrl, setCategoryUrl] = useState("");
   const [maxPages, setMaxPages] = useState("2");
@@ -35,6 +43,7 @@ export default function NewScrapePage() {
 
     setSubmitting(true);
     const body: StartAmazonScrapeRequest = {
+      marketplace,
       keyword: keyword.trim() || undefined,
       categoryUrl: categoryUrl.trim() || undefined,
       maxPages: Number(maxPages) || 1,
@@ -77,6 +86,37 @@ export default function NewScrapePage() {
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-5">
           <div className="flex flex-col gap-1.5">
+            <span className={labelClass} id="marketplace-label">
+              Marketplace
+            </span>
+            <div role="radiogroup" aria-labelledby="marketplace-label" className="grid grid-cols-2 gap-2">
+              {MARKETPLACE_CODES.map((code) => {
+                const site = MARKETPLACES[code];
+                const active = marketplace === code;
+                return (
+                  <button
+                    key={code}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    onClick={() => setMarketplace(code)}
+                    className={`flex flex-col items-start rounded-lg border px-3 py-2 text-left transition-colors ${
+                      active
+                        ? "border-indigo-400 bg-indigo-50 ring-2 ring-indigo-100"
+                        : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
+                    }`}
+                  >
+                    <span className={`text-sm font-medium ${active ? "text-indigo-700" : "text-slate-800"}`}>
+                      {site.label}
+                    </span>
+                    <span className="font-mono text-xs text-slate-400">{site.domain}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
             <label className={labelClass} htmlFor="keyword">
               Keyword
             </label>
@@ -97,8 +137,13 @@ export default function NewScrapePage() {
               id="categoryUrl"
               className={`${inputClass} font-mono text-xs`}
               value={categoryUrl}
-              onChange={(e) => setCategoryUrl(e.target.value)}
-              placeholder="https://www.amazon.com/s?..."
+              onChange={(e) => {
+                setCategoryUrl(e.target.value);
+                // A pasted link already says which Amazon site it is — follow it.
+                const detected = marketplaceFromUrl(e.target.value);
+                if (detected) setMarketplace(detected);
+              }}
+              placeholder={`https://www.${MARKETPLACES[marketplace].domain}/s?...`}
             />
           </div>
 

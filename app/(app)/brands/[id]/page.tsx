@@ -6,6 +6,7 @@ import { BrandEditForm } from "@/components/BrandEditForm";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ScoreBadge } from "@/components/ScoreBadge";
 import { avatarColorFor } from "@/lib/avatarColor";
+import { MARKETPLACES } from "@/lib/amazon/marketplaces";
 
 export const dynamic = "force-dynamic";
 
@@ -103,7 +104,15 @@ export default async function BrandDetailPage({
                       {product.title}
                     </a>
                   </td>
-                  <td className="px-6 py-3 font-mono text-xs text-slate-400">{product.asin}</td>
+                  <td className="px-6 py-3 font-mono text-xs text-slate-400">
+                    {product.asin}
+                    <span
+                      className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 font-sans text-[10px] font-semibold tracking-wide text-slate-500"
+                      title={MARKETPLACES[product.marketplace].domain}
+                    >
+                      {product.marketplace}
+                    </span>
+                  </td>
                   <td className="px-6 py-3">
                     <ScoreBadge score={product.lowSaleScore} />
                   </td>
