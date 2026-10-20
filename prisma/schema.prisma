@@ -23,6 +23,13 @@ enum ScrapeJobStatus {
   RUNNING
   COMPLETED
   FAILED
+  CANCELLED // stopped by the person who started it (or an admin)
+}
+
+// ADMIN sees and can manage every user's data; MEMBER only their own.
+enum UserRole {
+  MEMBER
+  ADMIN
 }
 
 enum BrandEnrichmentStatus {
@@ -45,6 +52,15 @@ model User {
 
   // scrypt hash (see lib/auth/password.ts) — never the password itself.
   passwordHash String
+
+  role UserRole @default(MEMBER)
+
+  // Everything a user scrapes belongs to them. Deleting the account keeps the
+  // data (userId becomes null) — then only an admin can see it.
+  jobs         ScrapeJob[]
+  products     Product[]
+  brands       Brand[]
+  metaAdBrands MetaAdBrand[]
 }
 
 model ScrapeJob {
@@ -69,9 +85,15 @@ model ScrapeJob {
   products     Product[]
   metaAdBrands MetaAdBrand[]
 
+  // Who started it. Products, brands and ad-library results it creates get the
+  // same owner (see lib/auth/access.ts).
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
   @@index([status])
   @@index([type])
   @@index([createdAt])
+  @@index([userId])
 }
 
 // Which Amazon site a product was scraped from (see lib/amazon/marketplaces.ts).
@@ -113,7 +135,13 @@ model Product {
   brand   Brand?  @relation(fields: [brandId], references: [id])
   brandId String?
 
-  @@unique([asin, marketplace])
+  // Each user has their own copy of a product, so two people scraping the same
+  // keyword don't overwrite each other's results.
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, asin, marketplace])
+  @@index([userId])
   @@index([marketplace])
   @@index([brandId])
   @@index([scrapeJobId])
@@ -127,8 +155,10 @@ model Brand {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Normalized (trimmed, lowercased) name used as the dedup/matching key.
-  name String @unique
+  // Normalized (trimmed, lowercased) name used as the dedup/matching key —
+  // unique per user, so everyone has their own brand list with their own
+  // enrichment results, manual edits and export history.
+  name String
 
   // Original casing as scraped, for display.
   displayName String
@@ -150,6 +180,11 @@ model Brand {
 
   products Product[]
 
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, name])
+  @@index([userId])
   @@index([enrichmentStatus])
 }
 
@@ -192,7 +227,11 @@ model MetaAdBrand {
   scrapeJob   ScrapeJob @relation(fields: [scrapeJobId], references: [id])
   scrapeJobId String
 
-  @@unique([pageId, searchKeyword])
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, pageId, searchKeyword])
+  @@index([userId])
   @@index([activeAdCount])
   @@index([searchKeyword])
   @@index([enrichmentStatus])

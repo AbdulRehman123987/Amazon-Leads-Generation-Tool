@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { findContactInfo, computeEnrichmentStatus, INTER_REQUEST_DELAY_MS } from "@/lib/enrichment/findContactInfo";
-import { setJobStatus, setJobTotal, recordJobItem } from "@/lib/jobs";
+import { setJobStatus, setJobTotal, recordJobItem, appendJobLog, isJobCancelled } from "@/lib/jobs";
 import type { BrandEnrichmentInput } from "@/lib/types";
 import type { Brand } from "@/lib/generated/prisma/client";
 
@@ -11,15 +11,20 @@ function sleep(ms: number) {
 async function enrichBrand(jobId: string, brand: Brand): Promise<void> {
   const result = await findContactInfo(jobId, brand.displayName, brand.websiteUrl);
 
+  // A lookup that finds nothing must not wipe details that are already there —
+  // someone may have filled them in by hand. New findings replace old ones.
+  const websiteUrl = result.websiteUrl ?? brand.websiteUrl;
+  const email = result.email ?? brand.email;
+
   await prisma.brand.update({
     where: { id: brand.id },
     data: {
-      websiteUrl: result.websiteUrl,
-      websiteConfidence: result.websiteConfidence,
-      email: result.email,
-      phone: result.phone,
-      contactPageUrl: result.contactPageUrl,
-      enrichmentStatus: computeEnrichmentStatus(result.websiteUrl, result.email, result.incomplete),
+      websiteUrl,
+      websiteConfidence: result.websiteConfidence ?? brand.websiteConfidence,
+      email,
+      phone: result.phone ?? brand.phone,
+      contactPageUrl: result.contactPageUrl ?? brand.contactPageUrl,
+      enrichmentStatus: computeEnrichmentStatus(websiteUrl, email, result.incomplete),
       rawNotes: result.notes.join("\n"),
     },
   });
@@ -32,10 +37,17 @@ export async function runBrandEnrichmentJob(jobId: string): Promise<void> {
   const input = job.input as unknown as BrandEnrichmentInput;
 
   try {
+    if (await isJobCancelled(jobId)) return; // stopped before it even started
+
     await setJobTotal(jobId, input.brandIds.length);
     await setJobStatus(jobId, "RUNNING", `Starting brand enrichment for ${input.brandIds.length} brand(s)`);
 
     for (const brandId of input.brandIds) {
+      if (await isJobCancelled(jobId)) {
+        await appendJobLog(jobId, "Stopped — brands not reached yet are left as they were", "warn");
+        return;
+      }
+
       const brand = await prisma.brand.findUnique({ where: { id: brandId } });
       if (!brand) {
         await recordJobItem(jobId, `Brand ${brandId} no longer exists — skipped`, { isError: true });

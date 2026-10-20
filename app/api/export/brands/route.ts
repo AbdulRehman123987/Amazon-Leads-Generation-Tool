@@ -3,7 +3,10 @@ import { prisma } from "@/lib/db";
 import { BrandEnrichmentStatus, Prisma } from "@/lib/generated/prisma/client";
 import { toCsv } from "@/lib/csv";
 import { withErrorHandling } from "@/lib/apiHandler";
+import { requireUser } from "@/lib/auth/currentUser";
+import { isAdmin, ownedBy } from "@/lib/auth/access";
 import { brandExportWhere, primaryProductArgs } from "@/lib/brands";
+import { searchesForBrands } from "@/lib/brandSearches";
 import type { ApiErrorResponse, ExportBrandsRequest } from "@/lib/types";
 
 const VALID_STATUSES = new Set<string>(Object.values(BrandEnrichmentStatus));
@@ -13,6 +16,8 @@ const MARK_CHUNK_SIZE = 5000;
 
 // POST rather than GET: exporting changes state (it marks the brands as exported).
 export const POST = withErrorHandling(async (request: Request) => {
+  const user = await requireUser();
+
   let body: ExportBrandsRequest;
   try {
     body = await request.json();
@@ -26,12 +31,24 @@ export const POST = withErrorHandling(async (request: Request) => {
     typeof body.status === "string" && VALID_STATUSES.has(body.status)
       ? (body.status as BrandEnrichmentStatus)
       : undefined;
+  const jobId = typeof body.jobId === "string" ? body.jobId : "";
 
   const brands = await prisma.brand.findMany({
-    where: brandExportWhere({ q, status, includeExported: body.includeExported === true }),
+    where: {
+      ...ownedBy(user),
+      ...brandExportWhere({ q, status, includeExported: body.includeExported === true }),
+      ...(jobId ? { products: { some: { scrapeJobId: jobId } } } : {}),
+    },
     orderBy: { updatedAt: "desc" },
-    include: { _count: { select: { products: true } }, products: primaryProductArgs },
+    include: {
+      _count: { select: { products: true } },
+      products: primaryProductArgs,
+      user: { select: { email: true } },
+    },
   });
+
+  const searches = await searchesForBrands(brands.map((b) => b.id));
+  const withOwner = isAdmin(user);
 
   const headers = [
     "Name",
@@ -39,9 +56,11 @@ export const POST = withErrorHandling(async (request: Request) => {
     "Email",
     "Phone",
     "Product URL",
+    "Found via",
     "Status",
     "Product Count",
     "Updated",
+    ...(withOwner ? ["Owner"] : []),
   ];
   const rows = brands.map((b) => [
     b.displayName,
@@ -49,16 +68,20 @@ export const POST = withErrorHandling(async (request: Request) => {
     b.email ?? "",
     b.phone ?? "",
     b.products[0]?.url ?? "",
+    (searches.get(b.id) ?? []).map((s) => s.label).join(" | "),
     b.enrichmentStatus,
     b._count.products,
     b.updatedAt.toISOString(),
+    ...(withOwner ? [b.user?.email ?? ""] : []),
   ]);
   const csv = toCsv(headers, rows);
 
   // Raw SQL on purpose: a typed update would also bump `updatedAt` (the
   // "Updated" column and the list order), and exporting doesn't change a brand.
   // UTC matches how Prisma stores DateTime in a TIMESTAMP(3) column.
-  const ids = brands.map((b) => b.id);
+  // Only your own brands are marked: an admin exporting everyone's leads must
+  // not flip the "Exported" flag on an employee's list.
+  const ids = brands.filter((b) => b.userId === user.id).map((b) => b.id);
   for (let i = 0; i < ids.length; i += MARK_CHUNK_SIZE) {
     await prisma.$executeRaw`
       UPDATE "Brand"

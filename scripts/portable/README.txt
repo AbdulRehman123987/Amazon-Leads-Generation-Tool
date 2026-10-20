@@ -19,7 +19,15 @@ Nothing to install: Node.js is included.
    To quit, close the black window.
 
 Your data is not stored on this PC. It lives in the team's shared database,
-so everyone sees the same brands and products.
+but you only see what you scraped yourself - your searches, products, brands
+and Ad Library results. The admin sees everyone's.
+
+Started a scrape by mistake? Open it (Jobs) and click "Stop job". Whatever it
+found so far is kept.
+
+Looked a brand up yourself? Open it in Brands, type in the website / email /
+phone and press Save. The status updates by itself (or pick one in the Status
+box). Only brands marked Found or Partial are included in the Brands export.
 
 
 If something goes wrong

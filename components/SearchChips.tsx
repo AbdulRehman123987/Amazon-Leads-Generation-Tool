@@ -28,7 +28,7 @@ export function SearchChips({
           href={buildHref(job.id)}
           className={`${baseClass} ${activeJobId === job.id ? activeClass : inactiveClass}`}
         >
-          {job.label} · {job.productCount}
+          {job.label} · {job.count}
         </Link>
       ))}
     </div>

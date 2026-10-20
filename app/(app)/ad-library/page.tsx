@@ -2,6 +2,8 @@ import Link from "next/link";
 import { Download, Megaphone, ThumbsUp, ExternalLink, Plus, Mail, Phone, Globe } from "lucide-react";
 import { prisma } from "@/lib/db";
 import type { Prisma } from "@/lib/generated/prisma/client";
+import { requirePageUser } from "@/lib/auth/currentUser";
+import { isAdmin, ownedBy } from "@/lib/auth/access";
 import { MetaAdsFilterBar } from "@/components/MetaAdsFilterBar";
 import { Pagination } from "@/components/Pagination";
 import { Button } from "@/components/Button";
@@ -21,6 +23,9 @@ export default async function AdLibraryPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const user = await requirePageUser();
+  const scope = ownedBy(user);
+  const admin = isAdmin(user);
   const params = await searchParams;
   const get = (key: string) => {
     const value = params[key];
@@ -35,6 +40,7 @@ export default async function AdLibraryPage({
   const sortParam = get("sort") || "-activeAdCount";
 
   const where: Prisma.MetaAdBrandWhereInput = {
+    ...scope,
     ...(q ? { pageName: { contains: q, mode: "insensitive" } } : {}),
     ...(keyword ? { searchKeyword: keyword } : {}),
     ...(minActiveAds != null && Number.isFinite(minActiveAds)
@@ -54,18 +60,20 @@ export default async function AdLibraryPage({
       orderBy,
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
+      include: { user: { select: { email: true } } },
     }),
     prisma.metaAdBrand.groupBy({
       by: ["searchKeyword"],
+      where: scope,
       _count: true,
       orderBy: { _count: { searchKeyword: "desc" } },
       take: MAX_KEYWORD_CHIPS,
     }),
-    // Unfiltered, same rule as Brand: skip FOUND, NOT_FOUND, and PARTIAL —
-    // each already checked once — so the bulk button doesn't keep
+    // Not narrowed by the filters, same rule as Brand: skip FOUND, NOT_FOUND,
+    // and PARTIAL — each already checked once — so the bulk button doesn't keep
     // re-spending credits on brands unlikely to resolve differently.
     prisma.metaAdBrand.count({
-      where: { enrichmentStatus: { notIn: ["FOUND", "NOT_FOUND", "PARTIAL"] } },
+      where: { ...scope, enrichmentStatus: { notIn: ["FOUND", "NOT_FOUND", "PARTIAL"] } },
     }),
   ]);
 
@@ -85,6 +93,7 @@ export default async function AdLibraryPage({
     phone: b.phone,
     enrichmentStatus: b.enrichmentStatus,
     updatedAt: b.updatedAt.toISOString(),
+    ...(admin ? { ownerEmail: b.user?.email ?? null } : {}),
   }));
 
   const baseParams = new URLSearchParams();
@@ -208,6 +217,7 @@ export default async function AdLibraryPage({
                   <th className="px-6 py-3 font-medium">Phone</th>
                   <th className="px-6 py-3 font-medium">Status</th>
                   <th className="px-6 py-3 font-medium">Updated</th>
+                  {admin && <th className="px-6 py-3 font-medium">Owner</th>}
                   <th className="px-6 py-3 font-medium"></th>
                 </tr>
               </thead>
@@ -306,6 +316,9 @@ export default async function AdLibraryPage({
                     <td className="px-6 py-3.5 text-slate-500">
                       {new Date(brand.updatedAt).toLocaleDateString()}
                     </td>
+                    {admin && (
+                      <td className="px-6 py-3.5 text-slate-500">{brand.ownerEmail ?? "unassigned"}</td>
+                    )}
                     <td className="px-6 py-3.5 text-right">
                       <MetaAdRowEnrichButton id={brand.id} />
                     </td>

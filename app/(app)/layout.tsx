@@ -5,6 +5,7 @@ import { NavLink } from "@/components/NavLink";
 import { SignOutButton } from "@/components/SignOutButton";
 import { ToastProvider } from "@/components/Toast";
 import { getCurrentUser } from "@/lib/auth/currentUser";
+import { isAdmin } from "@/lib/auth/access";
 
 const ICON_CLASS = "h-4 w-4 shrink-0";
 
@@ -45,6 +46,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           <p className="truncate px-3 text-xs text-slate-500" title={user.email}>
             {user.email}
           </p>
+          {isAdmin(user) && (
+            <p className="px-3 text-[11px] font-medium text-indigo-600">Admin — you see everyone&apos;s data</p>
+          )}
           <SignOutButton />
         </div>
       </aside>

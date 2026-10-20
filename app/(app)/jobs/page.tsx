@@ -2,9 +2,12 @@ import Link from "next/link";
 import { History, Search, Sparkles, PackageSearch, Megaphone, Wand2 } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { ScrapeJobStatus, ScrapeJobType, type Prisma } from "@/lib/generated/prisma/client";
+import { requirePageUser } from "@/lib/auth/currentUser";
+import { isAdmin, ownedBy } from "@/lib/auth/access";
 import { summarizeJobInput } from "@/lib/jobs";
 import { JobsFilterBar } from "@/components/JobsFilterBar";
 import { StatusBadge } from "@/components/StatusBadge";
+import { StopJobButton } from "@/components/StopJobButton";
 import { ProgressBar } from "@/components/ProgressBar";
 import { Pagination } from "@/components/Pagination";
 
@@ -26,6 +29,8 @@ export default async function JobsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const user = await requirePageUser();
+  const admin = isAdmin(user);
   const params = await searchParams;
   const get = (key: string) => {
     const value = params[key];
@@ -39,6 +44,7 @@ export default async function JobsPage({
   const page = Math.max(1, parseInt(get("page") || "1", 10) || 1);
 
   const where: Prisma.ScrapeJobWhereInput = {
+    ...ownedBy(user),
     ...(type ? { type } : {}),
     ...(status ? { status } : {}),
   };
@@ -50,7 +56,10 @@ export default async function JobsPage({
       orderBy: { createdAt: "desc" },
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
-      include: { _count: { select: { products: true, metaAdBrands: true } } },
+      include: {
+        _count: { select: { products: true, metaAdBrands: true } },
+        user: { select: { email: true } },
+      },
     }),
   ]);
 
@@ -69,7 +78,8 @@ export default async function JobsPage({
       <div>
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Jobs</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Every search and enrichment run — {total} total.
+          {admin ? "Every search and enrichment run by everyone" : "Every search and enrichment run"} —{" "}
+          {total} total.
         </p>
       </div>
 
@@ -91,6 +101,7 @@ export default async function JobsPage({
                   <th className="px-6 py-3 font-medium">Status</th>
                   <th className="px-6 py-3 font-medium">Progress</th>
                   <th className="px-6 py-3 font-medium">Started</th>
+                  {admin && <th className="px-6 py-3 font-medium">Owner</th>}
                   <th className="px-6 py-3 font-medium"></th>
                 </tr>
               </thead>
@@ -128,7 +139,13 @@ export default async function JobsPage({
                       </div>
                     </td>
                     <td className="px-6 py-3.5 text-slate-500">{job.createdAt.toLocaleString()}</td>
+                    {admin && (
+                      <td className="px-6 py-3.5 text-slate-500">{job.user?.email ?? "unassigned"}</td>
+                    )}
                     <td className="px-6 py-3.5 text-right">
+                      {(job.status === "PENDING" || job.status === "RUNNING") && (
+                        <StopJobButton jobId={job.id} compact />
+                      )}
                       {job.type === "AMAZON_SEARCH" && job._count.products > 0 && (
                         <Link
                           href={`/products?jobId=${job.id}`}

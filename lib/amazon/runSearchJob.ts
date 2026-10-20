@@ -3,7 +3,13 @@ import { scrapeDoFetch } from "@/lib/scrapeDo";
 import { parseAmazonSearchResults, parseAmazonProductPage } from "@/lib/amazon/parse";
 import { computeLowSaleScore } from "@/lib/scoring";
 import { findOrCreateBrand } from "@/lib/brands";
-import { setJobStatus, setJobTotal, appendJobLog, recordJobItem } from "@/lib/jobs";
+import {
+  setJobStatus,
+  setJobTotal,
+  appendJobLog,
+  recordJobItem,
+  isJobCancelled,
+} from "@/lib/jobs";
 import {
   DEFAULT_MARKETPLACE,
   MARKETPLACES,
@@ -33,13 +39,16 @@ function buildSearchPageUrl(input: AmazonSearchInput, marketplace: MarketplaceCo
 
 /**
  * Runs an AMAZON_SEARCH job end to end: paginated search-results discovery,
- * then a per-product detail fetch for brand/BSR, upserting Product rows and
- * matching/creating Brand rows as it goes. Designed to survive individual
- * page/item failures — only a fatal, unexpected error fails the whole job.
+ * then a per-product detail fetch for brand/BSR, saving Product rows and
+ * matching/creating Brand rows as it goes — all owned by whoever started the
+ * job. Designed to survive individual page/item failures — only a fatal,
+ * unexpected error fails the whole job. Checks between pages and products
+ * whether the job was stopped, and if so keeps what it has and returns.
  */
 export async function runAmazonSearchJob(jobId: string): Promise<void> {
   const job = await prisma.scrapeJob.findUnique({ where: { id: jobId } });
   if (!job) return;
+  const userId = job.userId;
 
   const input = job.input as unknown as AmazonSearchInput;
   // Jobs from before marketplaces existed carry none, and were all amazon.com.
@@ -48,7 +57,15 @@ export async function runAmazonSearchJob(jobId: string): Promise<void> {
   // Fetch pages the way a shopper in that country sees them (UK prices, UK listings).
   const fetchOptions = { render: true, ...(site.geoCode ? { geoCode: site.geoCode } : {}) };
 
+  async function wasStopped(): Promise<boolean> {
+    if (!(await isJobCancelled(jobId))) return false;
+    await appendJobLog(jobId, "Stopped — what was found so far is kept", "warn");
+    return true;
+  }
+
   try {
+    if (await isJobCancelled(jobId)) return; // stopped before it even started
+
     await setJobStatus(
       jobId,
       "RUNNING",
@@ -61,6 +78,8 @@ export async function runAmazonSearchJob(jobId: string): Promise<void> {
     const candidatesByAsin = new Map<string, RawAmazonSearchItem>();
 
     for (let page = 1; page <= input.maxPages; page++) {
+      if (await wasStopped()) return;
+
       const searchUrl = buildSearchPageUrl(input, marketplace, page);
       await appendJobLog(jobId, `Fetching search page ${page}/${input.maxPages}`);
 
@@ -91,8 +110,10 @@ export async function runAmazonSearchJob(jobId: string): Promise<void> {
     await appendJobLog(jobId, `${candidates.length} candidate product(s) to process`);
 
     // Phase 2: fetch each candidate's detail page for brand + BSR, score it,
-    // and upsert. Errors here are per-item — logged, counted, and skipped.
+    // and save it. Errors here are per-item — logged, counted, and skipped.
     for (const item of candidates) {
+      if (await wasStopped()) return;
+
       try {
         const { html } = await scrapeDoFetch(item.url, fetchOptions);
         const detail = parseAmazonProductPage(html);
@@ -108,45 +129,42 @@ export async function runAmazonSearchJob(jobId: string): Promise<void> {
           continue;
         }
 
-        const brand = detail.brandNameRaw ? await findOrCreateBrand(detail.brandNameRaw) : null;
+        const brand = detail.brandNameRaw ? await findOrCreateBrand(detail.brandNameRaw, userId) : null;
         const lowSaleScore = computeLowSaleScore({ reviewCount: item.reviewCount, bsr: detail.bsr });
 
-        await prisma.product.upsert({
-          // An ASIN is unique per marketplace: the same product on amazon.co.uk is its own row.
-          where: { asin_marketplace: { asin: item.asin, marketplace } },
-          create: {
-            asin: item.asin,
-            marketplace,
-            title: item.title,
-            url: item.url,
-            imageUrl: item.imageUrl,
-            price: item.price,
-            currency: item.currency,
-            reviewCount: item.reviewCount,
-            rating: item.rating,
-            bsr: detail.bsr,
-            category: detail.category,
-            brandNameRaw: detail.brandNameRaw,
-            lowSaleScore,
-            scrapeJobId: jobId,
-            brandId: brand?.id,
-          },
-          update: {
-            title: item.title,
-            url: item.url,
-            imageUrl: item.imageUrl,
-            price: item.price,
-            currency: item.currency,
-            reviewCount: item.reviewCount,
-            rating: item.rating,
-            bsr: detail.bsr,
-            category: detail.category,
-            brandNameRaw: detail.brandNameRaw,
-            lowSaleScore,
-            scrapeJobId: jobId,
-            ...(brand ? { brandId: brand.id } : {}),
-          },
+        const fields = {
+          title: item.title,
+          url: item.url,
+          imageUrl: item.imageUrl,
+          price: item.price,
+          currency: item.currency,
+          reviewCount: item.reviewCount,
+          rating: item.rating,
+          bsr: detail.bsr,
+          category: detail.category,
+          brandNameRaw: detail.brandNameRaw,
+          lowSaleScore,
+          scrapeJobId: jobId,
+        };
+
+        // A product is unique per owner and marketplace: the same ASIN found by
+        // another user, or on amazon.co.uk, is its own row. Look it up first
+        // rather than upserting, because the owner can be null (an account that
+        // was deleted) and Prisma can't use a null in a compound unique key.
+        const existing = await prisma.product.findFirst({
+          where: { userId, asin: item.asin, marketplace },
+          select: { id: true },
         });
+        if (existing) {
+          await prisma.product.update({
+            where: { id: existing.id },
+            data: { ...fields, ...(brand ? { brandId: brand.id } : {}) },
+          });
+        } else {
+          await prisma.product.create({
+            data: { ...fields, asin: item.asin, marketplace, userId, brandId: brand?.id },
+          });
+        }
 
         await recordJobItem(
           jobId,

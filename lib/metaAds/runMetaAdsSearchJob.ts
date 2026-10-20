@@ -1,6 +1,12 @@
 import { prisma } from "@/lib/db";
 import { searchMetaAdLibrary } from "@/lib/searchApi";
-import { setJobStatus, setJobTotal, appendJobLog, recordJobItem } from "@/lib/jobs";
+import {
+  setJobStatus,
+  setJobTotal,
+  appendJobLog,
+  recordJobItem,
+  isJobCancelled,
+} from "@/lib/jobs";
 import type { MetaAdsSearchInput } from "@/lib/types";
 
 // A broad keyword can match thousands of ads across many pages — cap how far
@@ -29,8 +35,17 @@ export async function runMetaAdsSearchJob(jobId: string): Promise<void> {
   if (!job) return;
 
   const input = job.input as unknown as MetaAdsSearchInput;
+  const userId = job.userId;
+
+  async function wasStopped(): Promise<boolean> {
+    if (!(await isJobCancelled(jobId))) return false;
+    await appendJobLog(jobId, "Stopped — what was found so far is kept", "warn");
+    return true;
+  }
 
   try {
+    if (await isJobCancelled(jobId)) return; // stopped before it even started
+
     await setJobStatus(
       jobId,
       "RUNNING",
@@ -43,6 +58,7 @@ export async function runMetaAdsSearchJob(jobId: string): Promise<void> {
     let totalAdsScanned = 0;
 
     for (let page = 1; page <= MAX_PAGES; page++) {
+      if (await wasStopped()) return;
       await appendJobLog(jobId, `Fetching Ad Library results page ${page}`);
 
       let result;
@@ -107,32 +123,33 @@ export async function runMetaAdsSearchJob(jobId: string): Promise<void> {
     await setJobTotal(jobId, qualifying.length);
 
     for (const [pageId, data] of qualifying) {
+      if (await wasStopped()) return;
+
       try {
-        await prisma.metaAdBrand.upsert({
-          where: { pageId_searchKeyword: { pageId, searchKeyword: input.keyword } },
-          create: {
-            pageId,
-            pageName: data.pageName,
-            pageProfileUri: data.pageProfileUri,
-            pageProfilePicture: data.pageProfilePicture,
-            pageLikeCount: data.pageLikeCount,
-            pageCategory: data.pageCategory,
-            searchKeyword: input.keyword,
-            activeAdCount: data.count,
-            sampleAdSnippet: data.sampleAdSnippet,
-            scrapeJobId: jobId,
-          },
-          update: {
-            pageName: data.pageName,
-            pageProfileUri: data.pageProfileUri,
-            pageProfilePicture: data.pageProfilePicture,
-            pageLikeCount: data.pageLikeCount,
-            pageCategory: data.pageCategory,
-            activeAdCount: data.count,
-            sampleAdSnippet: data.sampleAdSnippet,
-            scrapeJobId: jobId,
-          },
+        const fields = {
+          pageName: data.pageName,
+          pageProfileUri: data.pageProfileUri,
+          pageProfilePicture: data.pageProfilePicture,
+          pageLikeCount: data.pageLikeCount,
+          pageCategory: data.pageCategory,
+          activeAdCount: data.count,
+          sampleAdSnippet: data.sampleAdSnippet,
+          scrapeJobId: jobId,
+        };
+        // Unique per owner, pageId and keyword. Looked up rather than upserted:
+        // the owner can be null (a deleted account) and Prisma can't use a null
+        // in a compound unique key.
+        const existing = await prisma.metaAdBrand.findFirst({
+          where: { userId, pageId, searchKeyword: input.keyword },
+          select: { id: true },
         });
+        if (existing) {
+          await prisma.metaAdBrand.update({ where: { id: existing.id }, data: fields });
+        } else {
+          await prisma.metaAdBrand.create({
+            data: { ...fields, pageId, searchKeyword: input.keyword, userId },
+          });
+        }
         await recordJobItem(jobId, `${data.pageName} — ${data.count} active ad(s)`);
       } catch (err) {
         await recordJobItem(jobId, `Failed to save "${data.pageName}": ${(err as Error).message}`, {

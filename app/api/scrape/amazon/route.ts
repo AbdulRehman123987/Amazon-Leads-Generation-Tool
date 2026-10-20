@@ -3,6 +3,7 @@ import { after } from "next/server";
 import { createScrapeJob } from "@/lib/jobs";
 import { runAmazonSearchJob } from "@/lib/amazon/runSearchJob";
 import { withErrorHandling } from "@/lib/apiHandler";
+import { requireUser } from "@/lib/auth/currentUser";
 import {
   DEFAULT_MARKETPLACE,
   MARKETPLACES,
@@ -30,6 +31,8 @@ function positiveIntOrUndefined(value: unknown): number | undefined {
 }
 
 export const POST = withErrorHandling(async (request: Request) => {
+  const user = await requireUser();
+
   let body: StartAmazonScrapeRequest;
   try {
     body = await request.json();
@@ -96,7 +99,8 @@ export const POST = withErrorHandling(async (request: Request) => {
 
   const job = await createScrapeJob(
     "AMAZON_SEARCH",
-    input as unknown as Prisma.InputJsonValue
+    input as unknown as Prisma.InputJsonValue,
+    user.id
   );
 
   after(() => runAmazonSearchJob(job.id));

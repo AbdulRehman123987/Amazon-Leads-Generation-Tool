@@ -113,6 +113,11 @@ export function ProductCard({
           )}
           {product.brand && <StatusBadge status={product.brand.enrichmentStatus} />}
         </div>
+        {product.ownerEmail !== undefined && (
+          <p className="truncate text-[11px] text-slate-400" title={product.ownerEmail ?? undefined}>
+            {product.ownerEmail ?? "unassigned"}
+          </p>
+        )}
       </div>
     </div>
   );

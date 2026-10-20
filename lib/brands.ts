@@ -59,9 +59,11 @@ export const primaryProductArgs = {
  * to the enrichment step and to manual corrections made in the UI, not to
  * whatever a later Amazon re-scrape happened to read off the byline.
  */
-export async function findOrCreateBrand(rawName: string): Promise<Brand> {
+export async function findOrCreateBrand(rawName: string, userId: string | null): Promise<Brand> {
   const name = normalizeBrandName(rawName);
-  const existing = await prisma.brand.findUnique({ where: { name } });
+  // Brands are per owner: two people who both find "Anker" each get their own
+  // row, with their own enrichment, manual edits and export history.
+  const existing = await prisma.brand.findFirst({ where: { userId, name } });
   if (existing) return existing;
-  return prisma.brand.create({ data: { name, displayName: rawName.trim() } });
+  return prisma.brand.create({ data: { name, displayName: rawName.trim(), userId } });
 }

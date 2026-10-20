@@ -84,7 +84,7 @@ export function ProductsFilterBar({
           <option value="">All searches</option>
           {jobOptions.map((job) => (
             <option key={job.id} value={job.id}>
-              {job.label} ({job.productCount})
+              {job.label} ({job.count})
             </option>
           ))}
         </select>

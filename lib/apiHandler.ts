@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getCurrentUser } from "@/lib/auth/currentUser";
+import { getCurrentUser, NotSignedInError } from "@/lib/auth/currentUser";
 import type { ApiErrorResponse } from "@/lib/types";
 
 /**
@@ -8,18 +8,22 @@ import type { ApiErrorResponse } from "@/lib/types";
  * error (validation errors we throw ourselves, or unexpected ones like a DB
  * connection failure) into a proper `{ error }` JSON response instead of
  * Next's default HTML error page. Only the sign-in/out routes skip it.
+ *
+ * Handlers get the user with `requireUser()` and must scope every query on
+ * jobs, products, brands and ad-library rows with `ownedBy(user)`.
  */
 export function withErrorHandling<Args extends unknown[]>(
   handler: (...args: Args) => Promise<Response>
 ) {
   return async (...args: Args): Promise<Response> => {
     try {
-      if (!(await getCurrentUser())) {
+      if (!(await getCurrentUser())) throw new NotSignedInError();
+      return await handler(...args);
+    } catch (err) {
+      if (err instanceof NotSignedInError) {
         const body: ApiErrorResponse = { error: "Not signed in" };
         return NextResponse.json(body, { status: 401 });
       }
-      return await handler(...args);
-    } catch (err) {
       console.error(err);
       const body: ApiErrorResponse = {
         error: err instanceof Error ? err.message : "Unexpected server error",
