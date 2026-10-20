@@ -280,6 +280,23 @@ persistent Node.js process — a self-hosted `next start` or a Docker container.
 On a serverless platform with a short function-execution limit, a scrape job
 spanning many pages/products could be killed mid-run.
 
+### Vercel
+
+It builds and runs, with two things to know:
+
+- `next.config.ts` turns `output: "standalone"` off when `VERCEL` is set (Vercel
+  sets it during its builds). Left on, the build ends with
+  `ENOENT ... .next/next-server.js.nft.json`. Docker and the portable zip still
+  use standalone.
+- A job is cut off when the function reaches its time limit (`maxDuration`,
+  plan-dependent), leaving it "running" — **Stop** it from the Jobs page. Long
+  scrapes belong on the Docker/VPS setup or the portable zip.
+
+Set `DATABASE_URL` (the Supabase **transaction pooler**, port 6543), `AUTH_SECRET`,
+`SCRAPE_DO_API_KEY` and `SEARCHAPI_API_KEY` in the Vercel project's environment
+variables, and run `npx prisma migrate deploy` against Supabase before the first
+deploy of a version with schema changes.
+
 ### Docker on a VPS, with Supabase as the database
 
 1. Create a Supabase project and put two of its URIs in `.env` (Connect), with
