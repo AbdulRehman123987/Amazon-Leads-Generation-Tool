@@ -104,7 +104,7 @@ export function BrandEditForm({
         <h2 className="text-sm font-semibold text-slate-900">Contact details</h2>
         <div className="flex flex-wrap items-center gap-2">
           <a
-            href={`https://www.google.com/search?q=${encodeURIComponent(`${brandName} official website contact email`)}`}
+            href={`https://www.google.com/search?q=${encodeURIComponent(brandName)}`}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50"
