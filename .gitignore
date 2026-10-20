@@ -43,3 +43,6 @@ next-env.d.ts
 
 # prisma generated client
 /lib/generated/
+
+# portable zip output — contains a copy of .env (database password, API keys)
+/dist/

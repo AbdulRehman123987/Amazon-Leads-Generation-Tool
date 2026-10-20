@@ -6,12 +6,16 @@ const STYLES_BY_STATUS: Record<string, { pill: string; dot: string }> = {
   RUNNING: { pill: "bg-indigo-50 text-indigo-700", dot: "bg-indigo-500" },
   COMPLETED: { pill: "bg-emerald-50 text-emerald-700", dot: "bg-emerald-500" },
   FAILED: { pill: "bg-rose-50 text-rose-700", dot: "bg-rose-500" },
+  CANCELLED: { pill: "bg-slate-200 text-slate-700", dot: "bg-slate-500" },
   NOT_STARTED: { pill: "bg-slate-100 text-slate-600", dot: "bg-slate-400" },
   IN_PROGRESS: { pill: "bg-indigo-50 text-indigo-700", dot: "bg-indigo-500" },
   FOUND: { pill: "bg-emerald-50 text-emerald-700", dot: "bg-emerald-500" },
   PARTIAL: { pill: "bg-amber-50 text-amber-700", dot: "bg-amber-500" },
   NOT_FOUND: { pill: "bg-rose-50 text-rose-700", dot: "bg-rose-500" },
 };
+
+// People stop a job; the stored value is CANCELLED.
+const LABELS_BY_STATUS: Record<string, string> = { CANCELLED: "STOPPED" };
 
 export function StatusBadge({ status }: { status: string }) {
   const style = STYLES_BY_STATUS[status] ?? { pill: "bg-slate-100 text-slate-600", dot: "bg-slate-400" };
@@ -22,7 +26,7 @@ export function StatusBadge({ status }: { status: string }) {
       className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${style.pill}`}
     >
       <span className={`h-1.5 w-1.5 rounded-full ${style.dot} ${isActive ? "animate-pulse" : ""}`} />
-      {status.replace(/_/g, " ")}
+      {LABELS_BY_STATUS[status] ?? status.replace(/_/g, " ")}
     </span>
   );
 }

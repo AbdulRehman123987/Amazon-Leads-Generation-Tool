@@ -77,6 +77,22 @@ fallback selectors tried in order). One quirk worth knowing: Google often
 serves result links as opaque `/goto?url=<token>` redirects, so the
 destination is read from the URL printed under each title (`<cite>`).
 
+## Amazon marketplaces (US / UK)
+
+"New Scrape" starts with a **Marketplace** choice: United States (`amazon.com`)
+or United Kingdom (`amazon.co.uk`). It decides the search URL and the product
+URLs that get saved, and for the UK scrape.do fetches with `geoCode=gb` so pages
+look as they do to a UK shopper (prices in £). A pasted category URL must belong
+to the chosen marketplace (the form switches the choice for you when you paste
+one). Products remember their marketplace (`Product.marketplace`): the same ASIN
+on both sites is two separate rows, and the Products page can filter by it.
+Brands are shared across marketplaces.
+
+To add another site (say `amazon.de`): add it to `lib/amazon/marketplaces.ts`,
+add the value to the `AmazonMarketplace` enum in `prisma/schema.prisma` with a
+migration, and check the selectors in `lib/amazon/selectors.ts` against a saved
+page of that site (they were verified on amazon.com and amazon.co.uk).
+
 ## Finding a brand's website
 
 `lib/enrichment/findContactInfo.ts`, in order, stopping at the first success:
@@ -102,8 +118,8 @@ searches the Meta Ad Library (via [SearchAPI.io](https://www.searchapi.io/),
 least N currently-active ads for it (`active_status=active`) — a brand that's
 actively spending on ads is a live, responsive lead in a way a dormant Amazon
 listing isn't. Results land in the `MetaAdBrand` table, keyed by
-(`pageId`, `searchKeyword`) — re-running the same keyword search updates the
-ad counts rather than duplicating rows, since they're a live snapshot, not
+(owner, `pageId`, `searchKeyword`) — re-running the same keyword search updates
+the ad counts rather than duplicating rows, since they're a live snapshot, not
 history. A single search scans up to 5 pages of Ad Library results
 (`MAX_PAGES` in `lib/metaAds/runMetaAdsSearchJob.ts`) to bound cost/time on
 broad keywords; the job log says explicitly if that cap was hit.
@@ -149,15 +165,112 @@ source. To wire it up:
   `MetaAdBrand` (shared discovery logic lives in `findContactInfo.ts`)
 - `lib/metaAds/` — the Ad Library search job runner and the Ad Library
   contact-enrichment job runner
-- `lib/jobs.ts` — `ScrapeJob` lifecycle helpers (status, progress, logs)
+- `lib/jobs.ts` — `ScrapeJob` lifecycle helpers (status, progress, logs, stopping)
+- `lib/auth/access.ts` — `ownedBy(user)`: who can see which rows (see "Who sees what")
+- `lib/brandStatus.ts` — the statuses a person can set by hand, and how a status follows the contact details
+- `lib/brandSearches.ts` — which searches each brand was found in (the "Found via" column)
 - `lib/scoring.ts` — the `lowSaleScore` formula
 - `app/api/scrape/amazon`, `app/api/scrape/enrich`, `app/api/scrape/meta-ads`,
   `app/api/scrape/meta-ads/enrich` — start a job
-- `app/api/jobs/[id]` — polled by the job detail page while it runs
+- `app/api/jobs/[id]` — polled by the job detail page while it runs;
+  `app/api/jobs/[id]/cancel` (POST) stops it
 - `app/api/export/{products,meta-ads}` — CSV export of the current filtered view
 - `app/api/export/brands` (POST) — CSV of Found/Partial brands only (Not found is never
   exported). Skips brands exported before unless `includeExported` is set, and marks what
   it exports (`Brand.exportedAt`)
+
+## Login
+
+Every page and API route needs a signed-in user: `proxy.ts` checks a signed
+session cookie on every request, and `lib/auth/currentUser.ts` also confirms the
+account still exists. There is no sign-up form — an admin creates accounts with
+`scripts/users.mjs`:
+
+```
+npm run user -- create alice@company.com      # generates a password, shown once
+npm run user -- create bob@company.com 'ChosenPass1'
+npm run user -- create carol@company.com --admin   # an admin sees everyone's data
+npm run user -- role alice@company.com admin       # or: member
+npm run user -- password alice@company.com    # reset (generates a new one)
+npm run user -- delete alice@company.com      # locked out within ~30 seconds
+npm run user -- list                          # shows each account's role
+npm run user -- secret                        # a new AUTH_SECRET for .env
+```
+
+`AUTH_SECRET` (32+ random characters in `.env`) signs the session cookies;
+sessions last 7 days. Five wrong passwords lock that email out for 15 minutes.
+Behind HTTPS (a reverse proxy), make sure it forwards `X-Forwarded-Proto` so the
+cookie is marked `Secure` (Caddy and nginx's usual setups do).
+
+## Who sees what
+
+Every scrape job, product, brand and Ad Library row belongs to the person who
+started it (`userId`). Two people who scrape the same keyword each get their own
+rows — their own brands, their own enrichment results, their own manual edits
+and "Exported" flags. Nobody can read, edit, stop or export someone else's rows:
+the pages and API routes answer 404, exactly as for something that doesn't
+exist.
+
+- **Admin** (`User.role = ADMIN`, stored in the database so every copy of the
+  app agrees) sees everything, with an "Owner" column/tag on each list, and the
+  dashboard gets a **Team activity** table (`lib/teamStats.ts`): per person, the
+  searches run, products and brands found, how many brands are Found / Partial /
+  Not found / Pending, how many have an email or were exported, their Ad Library
+  results, and when they were last active. The
+  migration made `rehmanmirza458@gmail.com` the admin and gave it all the data
+  that existed before accounts owned anything. Change roles with
+  `npm run user -- role <email> <admin|member>`; the last admin can't be
+  demoted or deleted.
+- Deleting an account keeps its data, now unowned: only an admin can see it.
+- An admin's "Enrich pending brands" works on everything the admin can see.
+  An admin's CSV export includes everyone's brands but only marks the admin's
+  own as exported, so it never changes an employee's "Skip already exported" list.
+- **For developers:** spread `ownedBy(user)` (`lib/auth/access.ts`) into the
+  `where` of every query on those four tables, and create rows with the
+  current user's id. Forgetting it shows one person's leads to another.
+
+## Stopping a job
+
+A job that is pending or running has a **Stop** button (job page and Jobs list).
+The runner checks between items, so it finishes the one it is on, keeps
+everything found so far, and ends as **Stopped** (`CANCELLED`) — it can never
+flip back to Completed. Brands an enrichment hadn't reached keep their status.
+Stopping also clears a job left "running" by a closed window or a restart. You
+can only stop your own jobs (an admin can stop anyone's).
+
+## Brands: which search they came from, and manual lookups
+
+- Each brand lists the searches it was found in (**Found via**, in the table,
+  on the brand page and in the Brands CSV), and the Brands page can be narrowed
+  to one search with the chips or the dropdown (the export follows that filter).
+  A product belongs to the *latest* search that saw it, so a later, overlapping
+  search takes over the products it has in common with an earlier one.
+- To look a brand up yourself, open it (**Search on Google** is there), enter
+  the website, email and phone, and save. The status follows what you entered —
+  website + email = Found, one of them = Partial — or pick one yourself in the
+  **Status** box (for example *Not found* after searching). Only Found and
+  Partial brands go into the Brands export, so this is how a hand-researched
+  brand becomes exportable. Each save adds a line to the brand's notes.
+
+## Portable zip for the team (Windows)
+
+`npm run package` builds `dist\lead-scraper-portable.zip`: the production build,
+a copy of the installed `node.exe`, a filtered copy of `.env`, and `start.bat`.
+A teammate unzips it and double-clicks `start.bat` — no Node, Docker or editor
+to install — then signs in with an account made above. The app listens on
+`127.0.0.1:3210` only, and every copy shares the same Supabase database (each
+person only sees their own data in it — see "Who sees what").
+
+- The zip contains the database password and API keys (`.env`): share it inside
+  the team only, and rotate them when someone leaves. Since every PC holds
+  them, the login keeps casual users out but is not a hard boundary against a
+  technical teammate — that needs the app on a server instead.
+- Scrapes run inside each PC's `start.bat` window, so that PC must stay on, and
+  everyone shares one scrape.do credit pool.
+- After a schema change run `npx prisma migrate deploy` yourself, then build and
+  share a new zip. Copies built before the change stop working for scraping as
+  soon as the database changes (this applies to the per-user data migration), so
+  hand everyone the new zip at the same time.
 
 ## Deploying
 
@@ -169,11 +282,17 @@ spanning many pages/products could be killed mid-run.
 
 ### Docker on a VPS, with Supabase as the database
 
-1. Create a Supabase project and put its **Session pooler** URI (Connect ->
-   Session pooler, port 5432, your database password filled in) in `.env` as
-   `DATABASE_URL`. Don't add `sslmode=` — `lib/db.ts` switches SSL on for
-   Supabase hosts itself (Supabase's certificate isn't in Node's trust store,
-   so the chain isn't verified).
+1. Create a Supabase project and put two of its URIs in `.env` (Connect), with
+   your database password filled in:
+   - `DATABASE_URL` = the **Transaction pooler** (port 6543) — what the app
+     uses. It shares the project's small connection limit between many copies
+     of the app (each team member's PC, the VPS...).
+   - `DIRECT_URL` = the **Session pooler** (port 5432) — used only for
+     migrations, which need a real session.
+
+   Don't add `sslmode=` — `lib/db.ts` switches SSL on for Supabase hosts itself
+   (Supabase's certificate isn't in Node's trust store, so the chain isn't
+   verified).
 2. Create the tables once with `npx prisma migrate deploy` (the Docker
    entrypoint also runs it on every start).
 3. On the VPS, put the same `.env` next to the code and run

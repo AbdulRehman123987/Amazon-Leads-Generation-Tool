@@ -4,6 +4,8 @@ import { prisma } from "@/lib/db";
 import { createScrapeJob } from "@/lib/jobs";
 import { runBrandEnrichmentJob } from "@/lib/enrichment/runEnrichmentJob";
 import { withErrorHandling } from "@/lib/apiHandler";
+import { requireUser } from "@/lib/auth/currentUser";
+import { ownedBy } from "@/lib/auth/access";
 import type { Prisma } from "@/lib/generated/prisma/client";
 import type {
   ApiErrorResponse,
@@ -13,6 +15,10 @@ import type {
 } from "@/lib/types";
 
 export const POST = withErrorHandling(async (request: Request) => {
+  const user = await requireUser();
+  // Only brands the caller can see (their own; an admin's view is everyone's).
+  const scope = ownedBy(user);
+
   let body: StartBrandEnrichmentRequest;
   try {
     body = await request.json();
@@ -34,22 +40,27 @@ export const POST = withErrorHandling(async (request: Request) => {
     // changed. Any brand can still be retried deliberately, one at a time,
     // via its own "Re-run enrichment" button.
     const needsEnrichment = await prisma.brand.findMany({
-      where: { enrichmentStatus: { notIn: ["FOUND", "NOT_FOUND", "PARTIAL"] } },
+      where: { ...scope, enrichmentStatus: { notIn: ["FOUND", "NOT_FOUND", "PARTIAL"] } },
       select: { id: true },
     });
     brandIds = needsEnrichment.map((b) => b.id);
   } else if (Array.isArray(body.brandIds) && body.brandIds.length > 0) {
-    brandIds = body.brandIds.filter((id): id is string => typeof id === "string");
+    const requested = body.brandIds.filter((id): id is string => typeof id === "string");
+    const visible = await prisma.brand.findMany({
+      where: { id: { in: requested }, ...scope },
+      select: { id: true },
+    });
+    brandIds = visible.map((b) => b.id);
   } else if (Array.isArray(body.productIds) && body.productIds.length > 0) {
     const productIds = body.productIds.filter((id): id is string => typeof id === "string");
     const products = await prisma.product.findMany({
-      where: { id: { in: productIds }, brandId: { not: null } },
+      where: { id: { in: productIds }, brandId: { not: null }, ...scope },
       select: { brandId: true },
     });
     brandIds = [...new Set(products.map((p) => p.brandId).filter((id): id is string => id != null))];
   } else if (typeof body.jobId === "string" && body.jobId) {
     const products = await prisma.product.findMany({
-      where: { scrapeJobId: body.jobId, brandId: { not: null } },
+      where: { scrapeJobId: body.jobId, brandId: { not: null }, ...scope },
       select: { brandId: true },
     });
     brandIds = [...new Set(products.map((p) => p.brandId).filter((id): id is string => id != null))];
@@ -60,8 +71,13 @@ export const POST = withErrorHandling(async (request: Request) => {
     return NextResponse.json(error, { status: 400 });
   }
 
+  if (mode === "selected" && brandIds.length === 0) {
+    const error: ApiErrorResponse = { error: "No matching brands found" };
+    return NextResponse.json(error, { status: 404 });
+  }
+
   const input: BrandEnrichmentInput = { mode, brandIds };
-  const job = await createScrapeJob("BRAND_ENRICHMENT", input as unknown as Prisma.InputJsonValue);
+  const job = await createScrapeJob("BRAND_ENRICHMENT", input as unknown as Prisma.InputJsonValue, user.id);
 
   after(() => runBrandEnrichmentJob(job.id));
 

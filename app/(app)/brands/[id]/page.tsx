@@ -1,11 +1,15 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, FileText, PackageSearch } from "lucide-react";
+import { ArrowLeft, FileText, History, PackageSearch } from "lucide-react";
 import { prisma } from "@/lib/db";
+import { requirePageUser } from "@/lib/auth/currentUser";
+import { isAdmin, ownedBy } from "@/lib/auth/access";
+import { searchesForBrands } from "@/lib/brandSearches";
 import { BrandEditForm } from "@/components/BrandEditForm";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ScoreBadge } from "@/components/ScoreBadge";
 import { avatarColorFor } from "@/lib/avatarColor";
+import { MARKETPLACES } from "@/lib/amazon/marketplaces";
 
 export const dynamic = "force-dynamic";
 
@@ -14,12 +18,19 @@ export default async function BrandDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  const user = await requirePageUser();
   const { id } = await params;
-  const brand = await prisma.brand.findUnique({
-    where: { id },
-    include: { products: { orderBy: { createdAt: "desc" } } },
+  // Someone else's brand looks exactly like one that doesn't exist.
+  const brand = await prisma.brand.findFirst({
+    where: { id, ...ownedBy(user) },
+    include: {
+      products: { orderBy: { createdAt: "desc" } },
+      user: { select: { email: true } },
+    },
   });
   if (!brand) notFound();
+
+  const searches = (await searchesForBrands([brand.id])).get(brand.id) ?? [];
 
   return (
     <div className="flex max-w-3xl flex-col gap-6">
@@ -41,17 +52,41 @@ export default async function BrandDetailPage({
           <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
             {brand.displayName}
           </h1>
-          <div className="mt-1">
+          <div className="mt-1 flex flex-wrap items-center gap-2">
             <StatusBadge status={brand.enrichmentStatus} />
+            {isAdmin(user) && (
+              <span className="text-xs text-slate-400">Owner: {brand.user?.email ?? "unassigned"}</span>
+            )}
           </div>
         </div>
       </div>
 
+      {searches.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1 text-xs font-medium text-slate-400">
+            <History className="h-3.5 w-3.5" />
+            Found via:
+          </span>
+          {searches.map((search) => (
+            <Link
+              key={search.jobId}
+              href={`/jobs/${search.jobId}`}
+              title="Open this search"
+              className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-100"
+            >
+              {search.label}
+            </Link>
+          ))}
+        </div>
+      )}
+
       <BrandEditForm
         brandId={brand.id}
+        brandName={brand.displayName}
         initialWebsiteUrl={brand.websiteUrl}
         initialEmail={brand.email}
         initialPhone={brand.phone}
+        initialStatus={brand.enrichmentStatus}
       />
 
       <div className="rounded-2xl border border-slate-200/70 bg-white p-6 shadow-sm shadow-slate-200/50">
@@ -103,7 +138,15 @@ export default async function BrandDetailPage({
                       {product.title}
                     </a>
                   </td>
-                  <td className="px-6 py-3 font-mono text-xs text-slate-400">{product.asin}</td>
+                  <td className="px-6 py-3 font-mono text-xs text-slate-400">
+                    {product.asin}
+                    <span
+                      className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 font-sans text-[10px] font-semibold tracking-wide text-slate-500"
+                      title={MARKETPLACES[product.marketplace].domain}
+                    >
+                      {product.marketplace}
+                    </span>
+                  </td>
                   <td className="px-6 py-3">
                     <ScoreBadge score={product.lowSaleScore} />
                   </td>

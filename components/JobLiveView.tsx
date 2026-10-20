@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/Button";
 import { StatusBadge } from "@/components/StatusBadge";
+import { StopJobButton } from "@/components/StopJobButton";
 import { ProgressBar } from "@/components/ProgressBar";
 import { useToast } from "@/components/Toast";
 import { postJson } from "@/lib/apiClient";
@@ -23,6 +24,9 @@ import type { JobDetail, JobLogEntry, StartJobResponse } from "@/lib/types";
 
 const POLL_INTERVAL_MS = 2500;
 const ACTIVE_STATUSES = new Set(["PENDING", "RUNNING"]);
+// A stopped job's runner finishes the item it was on and writes a last log line
+// or two, so keep refreshing for a little while after the stop.
+const POLLS_AFTER_STOP = 6;
 
 const LOG_LEVEL_STYLES: Record<JobLogEntry["level"], string> = {
   info: "text-slate-300",
@@ -40,10 +44,13 @@ const JOB_TYPE_LABEL: Record<ScrapeJobType, string> = {
 export function JobLiveView({
   initialJob,
   resultCount,
+  ownerEmail,
 }: {
   initialJob: JobDetail;
   /** Products found (AMAZON_SEARCH) or advertisers found (META_ADS_SEARCH). */
   resultCount: number;
+  /** Who started it — only passed for an admin, who sees everyone's jobs. */
+  ownerEmail?: string | null;
 }) {
   const [job, setJob] = useState(initialJob);
   const [enriching, setEnriching] = useState(false);
@@ -51,19 +58,28 @@ export function JobLiveView({
   const toast = useToast();
   const logRef = useRef<HTMLDivElement>(null);
 
+  async function refreshJob() {
+    try {
+      const res = await fetch(`/api/jobs/${job.id}`, { cache: "no-store" });
+      if (!res.ok) return null;
+      const data: JobDetail = await res.json();
+      setJob(data);
+      return data;
+    } catch {
+      // transient network error — the next tick will retry
+      return null;
+    }
+  }
+
   useEffect(() => {
-    if (!ACTIVE_STATUSES.has(job.status)) return;
+    if (!ACTIVE_STATUSES.has(job.status) && job.status !== "CANCELLED") return;
+    let pollsSinceStop = 0;
     const interval = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/jobs/${job.id}`, { cache: "no-store" });
-        if (!res.ok) return;
-        const data: JobDetail = await res.json();
-        setJob(data);
-      } catch {
-        // transient network error — the next tick will retry
-      }
+      const data = await refreshJob();
+      if (data?.status === "CANCELLED" && ++pollsSinceStop >= POLLS_AFTER_STOP) clearInterval(interval);
     }, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refreshJob only reads job.id
   }, [job.status, job.id]);
 
   useEffect(() => {
@@ -103,8 +119,12 @@ export function JobLiveView({
             {summarizeJobInput(job)}
           </h1>
           <p className="mt-1 font-mono text-xs text-slate-400">{job.id}</p>
+          {ownerEmail !== undefined && (
+            <p className="mt-0.5 text-xs text-slate-400">Started by {ownerEmail ?? "nobody (unassigned)"}</p>
+          )}
         </div>
         <div className="flex flex-col items-end gap-1.5">
+          {ACTIVE_STATUSES.has(job.status) && <StopJobButton jobId={job.id} onDone={refreshJob} />}
           {job.type === "AMAZON_SEARCH" && resultCount > 0 && (
             <Link
               href={`/products?jobId=${job.id}`}
@@ -125,7 +145,8 @@ export function JobLiveView({
               View {resultCount} advertiser{resultCount === 1 ? "" : "s"} in Ad Library
             </Link>
           )}
-          {job.type === "AMAZON_SEARCH" && job.status === "COMPLETED" && (
+          {job.type === "AMAZON_SEARCH" &&
+            (job.status === "COMPLETED" || (job.status === "CANCELLED" && resultCount > 0)) && (
             <Button variant="primary" onClick={handleEnrich} disabled={enriching}>
               <Sparkles className="h-4 w-4" />
               {enriching ? "Starting…" : "Enrich brands for these results"}
@@ -133,6 +154,12 @@ export function JobLiveView({
           )}
         </div>
       </div>
+
+      {job.status === "CANCELLED" && (
+        <p className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          This job was stopped. Whatever it found before stopping is kept.
+        </p>
+      )}
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <div className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm shadow-slate-200/50">

@@ -5,7 +5,6 @@ import { pickBestCandidate } from "@/lib/enrichment/pickWebsite";
 import { isParkedPage, pageLooksLikeBrandSite } from "@/lib/enrichment/siteCheck";
 import { extractEmail, extractPhone, findContactPageLink } from "@/lib/enrichment/extractContact";
 import { appendJobLog } from "@/lib/jobs";
-import type { BrandEnrichmentStatus } from "@/lib/generated/prisma/client";
 
 // Entity-agnostic "find a website + email/phone for this name" — shared by
 // Amazon-sourced Brand enrichment and Meta Ad Library brand enrichment,
@@ -131,21 +130,7 @@ async function searchWeb(
   }
 }
 
-/**
- * FOUND if both a website and an email were found, PARTIAL if only one.
- * With nothing found, NOT_FOUND — unless part of the lookup couldn't run
- * (`incomplete`), in which case the brand stays NOT_STARTED so the next
- * enrichment sweep retries it instead of recording a false "not found".
- */
-export function computeEnrichmentStatus(
-  websiteUrl: string | null,
-  email: string | null,
-  incomplete = false
-): BrandEnrichmentStatus {
-  if (websiteUrl && email) return "FOUND";
-  if (websiteUrl || email) return "PARTIAL";
-  return incomplete ? "NOT_STARTED" : "NOT_FOUND";
-}
+export { computeEnrichmentStatus } from "@/lib/brandStatus";
 
 /**
  * Finds a website (a direct domain guess first, then a Bing search with

@@ -45,11 +45,13 @@ function appendEntry(
   return next as unknown as Prisma.InputJsonValue;
 }
 
+/** `userId` is who started it: the job, and everything it creates, belongs to them. */
 export async function createScrapeJob(
   type: ScrapeJobType,
-  input: Prisma.InputJsonValue
+  input: Prisma.InputJsonValue,
+  userId: string
 ) {
-  return prisma.scrapeJob.create({ data: { type, input } });
+  return prisma.scrapeJob.create({ data: { type, input, userId } });
 }
 
 export async function setJobStatus(
@@ -61,13 +63,39 @@ export async function setJobStatus(
     where: { id: jobId },
     select: { logs: true },
   });
-  await prisma.scrapeJob.update({
-    where: { id: jobId },
+  // A stopped job stays stopped: its runner may still be finishing the item it
+  // was on and would otherwise go on to report "completed".
+  await prisma.scrapeJob.updateMany({
+    where: { id: jobId, status: { not: "CANCELLED" } },
     data: {
       status,
       ...(logMessage ? { logs: appendEntry(job.logs, "info", logMessage) } : {}),
     },
   });
+}
+
+/** Runners call this between items and stop early when it's true. */
+export async function isJobCancelled(jobId: string): Promise<boolean> {
+  const job = await prisma.scrapeJob.findUnique({ where: { id: jobId }, select: { status: true } });
+  return job?.status === "CANCELLED";
+}
+
+/**
+ * Stops a pending or running job. The runner notices before its next item, so
+ * the item in flight finishes and everything found so far is kept. Returns
+ * false if the job had already finished.
+ */
+export async function cancelScrapeJob(jobId: string, stoppedBy: string): Promise<boolean> {
+  const job = await prisma.scrapeJob.findUnique({
+    where: { id: jobId },
+    select: { status: true, logs: true },
+  });
+  if (!job || (job.status !== "PENDING" && job.status !== "RUNNING")) return false;
+  const result = await prisma.scrapeJob.updateMany({
+    where: { id: jobId, status: { in: ["PENDING", "RUNNING"] } },
+    data: { status: "CANCELLED", logs: appendEntry(job.logs, "warn", `Stopped by ${stoppedBy}`) },
+  });
+  return result.count > 0;
 }
 
 export async function setJobTotal(jobId: string, totalItems: number) {

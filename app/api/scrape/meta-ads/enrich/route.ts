@@ -4,6 +4,8 @@ import { prisma } from "@/lib/db";
 import { createScrapeJob } from "@/lib/jobs";
 import { runMetaAdsEnrichmentJob } from "@/lib/metaAds/runMetaAdsEnrichmentJob";
 import { withErrorHandling } from "@/lib/apiHandler";
+import { requireUser } from "@/lib/auth/currentUser";
+import { ownedBy } from "@/lib/auth/access";
 import type { Prisma } from "@/lib/generated/prisma/client";
 import type {
   ApiErrorResponse,
@@ -13,6 +15,10 @@ import type {
 } from "@/lib/types";
 
 export const POST = withErrorHandling(async (request: Request) => {
+  const user = await requireUser();
+  // Only rows the caller can see (their own; an admin's view is everyone's).
+  const scope = ownedBy(user);
+
   let body: StartMetaAdsEnrichmentRequest;
   try {
     body = await request.json();
@@ -32,12 +38,21 @@ export const POST = withErrorHandling(async (request: Request) => {
     // credits on brands unlikely to resolve differently. Still retriable one
     // at a time via the per-row retry icon.
     const needsEnrichment = await prisma.metaAdBrand.findMany({
-      where: { enrichmentStatus: { notIn: ["FOUND", "NOT_FOUND", "PARTIAL"] } },
+      where: { ...scope, enrichmentStatus: { notIn: ["FOUND", "NOT_FOUND", "PARTIAL"] } },
       select: { id: true },
     });
     metaAdBrandIds = needsEnrichment.map((b) => b.id);
   } else if (Array.isArray(body.metaAdBrandIds) && body.metaAdBrandIds.length > 0) {
-    metaAdBrandIds = body.metaAdBrandIds.filter((id): id is string => typeof id === "string");
+    const requested = body.metaAdBrandIds.filter((id): id is string => typeof id === "string");
+    const visible = await prisma.metaAdBrand.findMany({
+      where: { id: { in: requested }, ...scope },
+      select: { id: true },
+    });
+    metaAdBrandIds = visible.map((b) => b.id);
+    if (metaAdBrandIds.length === 0) {
+      const error: ApiErrorResponse = { error: "No matching brands found" };
+      return NextResponse.json(error, { status: 404 });
+    }
   } else {
     const error: ApiErrorResponse = {
       error: 'Provide metaAdBrandIds or mode="needs-enrichment"',
@@ -46,7 +61,11 @@ export const POST = withErrorHandling(async (request: Request) => {
   }
 
   const input: MetaAdsEnrichmentInput = { mode, metaAdBrandIds };
-  const job = await createScrapeJob("META_ADS_ENRICHMENT", input as unknown as Prisma.InputJsonValue);
+  const job = await createScrapeJob(
+    "META_ADS_ENRICHMENT",
+    input as unknown as Prisma.InputJsonValue,
+    user.id
+  );
 
   after(() => runMetaAdsEnrichmentJob(job.id));
 

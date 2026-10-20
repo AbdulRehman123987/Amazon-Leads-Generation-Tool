@@ -10,13 +10,15 @@ import type { ExportBrandsRequest } from "@/lib/types";
 interface ExportBrandsButtonProps {
   q: string;
   status: string;
-  /** Exportable brands (Found/Partial) not exported before, for the current search/status. */
+  /** Only brands found in this search (scrape job); empty = all searches. */
+  jobId: string;
+  /** Exportable brands (Found/Partial) not exported before, for the current filters. */
   newCount: number;
   /** Exportable brands including ones already exported. */
   allCount: number;
 }
 
-export function ExportBrandsButton({ q, status, newCount, allCount }: ExportBrandsButtonProps) {
+export function ExportBrandsButton({ q, status, jobId, newCount, allCount }: ExportBrandsButtonProps) {
   const router = useRouter();
   const toast = useToast();
   const [skipExported, setSkipExported] = useState(true);
@@ -36,7 +38,7 @@ export function ExportBrandsButton({ q, status, newCount, allCount }: ExportBran
   async function handleExport() {
     setExporting(true);
     try {
-      const body: ExportBrandsRequest = { q, status, includeExported: !skipExported };
+      const body: ExportBrandsRequest = { q, status, jobId, includeExported: !skipExported };
       const res = await fetch("/api/export/brands", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

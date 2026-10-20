@@ -12,7 +12,13 @@ const TYPE_OPTIONS = [
   { value: "META_ADS_ENRICHMENT", label: "Ad Library enrichment" },
 ];
 
-const STATUS_OPTIONS = ["PENDING", "RUNNING", "COMPLETED", "FAILED"];
+const STATUS_OPTIONS = [
+  { value: "PENDING", label: "Pending" },
+  { value: "RUNNING", label: "Running" },
+  { value: "COMPLETED", label: "Completed" },
+  { value: "FAILED", label: "Failed" },
+  { value: "CANCELLED", label: "Stopped" },
+];
 
 const inputClass =
   "rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 transition-colors focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100";
@@ -54,8 +60,8 @@ export function JobsFilterBar() {
         <select className={inputClass} value={status} onChange={(e) => setStatus(e.target.value)}>
           <option value="">Any</option>
           {STATUS_OPTIONS.map((opt) => (
-            <option key={opt} value={opt}>
-              {opt.charAt(0) + opt.slice(1).toLowerCase()}
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
             </option>
           ))}
         </select>

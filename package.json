@@ -8,6 +8,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "user": "node --disable-warning=ExperimentalWarning scripts/users.mjs",
+    "package": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-portable.ps1",
     "postinstall": "prisma generate"
   },
   "dependencies": {

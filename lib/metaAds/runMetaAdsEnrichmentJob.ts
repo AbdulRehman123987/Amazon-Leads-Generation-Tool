@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { findContactInfo, computeEnrichmentStatus, INTER_REQUEST_DELAY_MS } from "@/lib/enrichment/findContactInfo";
-import { setJobStatus, setJobTotal, recordJobItem } from "@/lib/jobs";
+import { setJobStatus, setJobTotal, recordJobItem, appendJobLog, isJobCancelled } from "@/lib/jobs";
 import type { MetaAdBrand } from "@/lib/generated/prisma/client";
 import type { MetaAdsEnrichmentInput } from "@/lib/types";
 
@@ -11,15 +11,19 @@ function sleep(ms: number) {
 async function enrichMetaAdBrand(jobId: string, brand: MetaAdBrand): Promise<void> {
   const result = await findContactInfo(jobId, brand.pageName, brand.websiteUrl);
 
+  // A lookup that finds nothing must not wipe details that are already there.
+  const websiteUrl = result.websiteUrl ?? brand.websiteUrl;
+  const email = result.email ?? brand.email;
+
   await prisma.metaAdBrand.update({
     where: { id: brand.id },
     data: {
-      websiteUrl: result.websiteUrl,
-      websiteConfidence: result.websiteConfidence,
-      email: result.email,
-      phone: result.phone,
-      contactPageUrl: result.contactPageUrl,
-      enrichmentStatus: computeEnrichmentStatus(result.websiteUrl, result.email, result.incomplete),
+      websiteUrl,
+      websiteConfidence: result.websiteConfidence ?? brand.websiteConfidence,
+      email,
+      phone: result.phone ?? brand.phone,
+      contactPageUrl: result.contactPageUrl ?? brand.contactPageUrl,
+      enrichmentStatus: computeEnrichmentStatus(websiteUrl, email, result.incomplete),
       rawNotes: result.notes.join("\n"),
     },
   });
@@ -32,6 +36,8 @@ export async function runMetaAdsEnrichmentJob(jobId: string): Promise<void> {
   const input = job.input as unknown as MetaAdsEnrichmentInput;
 
   try {
+    if (await isJobCancelled(jobId)) return; // stopped before it even started
+
     await setJobTotal(jobId, input.metaAdBrandIds.length);
     await setJobStatus(
       jobId,
@@ -40,6 +46,11 @@ export async function runMetaAdsEnrichmentJob(jobId: string): Promise<void> {
     );
 
     for (const metaAdBrandId of input.metaAdBrandIds) {
+      if (await isJobCancelled(jobId)) {
+        await appendJobLog(jobId, "Stopped — brands not reached yet are left as they were", "warn");
+        return;
+      }
+
       const brand = await prisma.metaAdBrand.findUnique({ where: { id: metaAdBrandId } });
       if (!brand) {
         await recordJobItem(jobId, `Ad Library brand ${metaAdBrandId} no longer exists — skipped`, {

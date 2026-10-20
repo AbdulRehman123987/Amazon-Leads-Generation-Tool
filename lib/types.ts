@@ -8,6 +8,7 @@ import type {
   ScrapeJobStatus,
   ScrapeJobType,
 } from "@/lib/generated/prisma/client";
+import type { MarketplaceCode } from "@/lib/amazon/marketplaces";
 
 export interface JobLogEntry {
   timestamp: string; // ISO 8601
@@ -16,6 +17,8 @@ export interface JobLogEntry {
 }
 
 export interface AmazonSearchInput {
+  /** Which Amazon site to scrape; jobs started before this existed have none and mean the US. */
+  marketplace?: MarketplaceCode;
   keyword?: string;
   categoryUrl?: string;
   maxPages: number;
@@ -42,6 +45,8 @@ export interface MetaAdsEnrichmentInput {
 // ---- API request bodies ----
 
 export interface StartAmazonScrapeRequest {
+  /** "US" (amazon.com, the default) or "UK" (amazon.co.uk). */
+  marketplace?: string;
   keyword?: string;
   categoryUrl?: string;
   maxPages?: number;
@@ -73,6 +78,12 @@ export interface UpdateBrandRequest {
   websiteUrl?: string | null;
   email?: string | null;
   phone?: string | null;
+  /**
+   * Set by hand after researching the brand (see lib/brandStatus.ts). Left out,
+   * the status follows the contact details: a website and an email -> FOUND,
+   * only one of them -> PARTIAL.
+   */
+  enrichmentStatus?: string;
 }
 
 // ---- API response bodies ----
@@ -105,6 +116,7 @@ export interface JobDetail extends JobSummary {
 export interface ProductRow {
   id: string;
   asin: string;
+  marketplace: MarketplaceCode;
   title: string;
   url: string;
   imageUrl: string | null;
@@ -116,13 +128,16 @@ export interface ProductRow {
   lowSaleScore: number | null;
   scrapeJobId: string;
   brand: { id: string; displayName: string; enrichmentStatus: BrandEnrichmentStatus } | null;
+  /** Whose product it is — only filled in for an admin, who sees everyone's. */
+  ownerEmail?: string | null;
 }
 
-/** One option in the "search" filter dropdown/chips on the Products page. */
+/** One option in the "search" filter dropdown/chips on the Products and Brands pages. */
 export interface JobOption {
   id: string;
   label: string;
-  productCount: number;
+  /** Products (on Products) or brands (on Brands) found in that search. */
+  count: number;
 }
 
 /** One row on the Jobs (search history) index page. */
@@ -142,14 +157,20 @@ export interface BrandSummary {
   productUrl: string | null;
   enrichmentStatus: BrandEnrichmentStatus;
   productCount: number;
+  /** The searches (scrape jobs) this brand was found in, newest first. */
+  searches: { jobId: string; label: string }[];
   /** When the brand last went out in a CSV export; null = never exported. */
   exportedAt: string | null;
   updatedAt: string;
+  /** Whose brand it is — only filled in for an admin, who sees everyone's. */
+  ownerEmail?: string | null;
 }
 
 export interface ExportBrandsRequest {
   q?: string;
   status?: string;
+  /** Only brands found in this search (scrape job). */
+  jobId?: string;
   /** Re-export brands that already went out before. Default: skip them. */
   includeExported?: boolean;
 }
@@ -170,4 +191,6 @@ export interface MetaAdBrandRow {
   phone: string | null;
   enrichmentStatus: BrandEnrichmentStatus;
   updatedAt: string;
+  /** Whose row it is — only filled in for an admin, who sees everyone's. */
+  ownerEmail?: string | null;
 }

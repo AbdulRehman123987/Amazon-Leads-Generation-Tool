@@ -1,8 +1,12 @@
 import Link from "next/link";
 import { Package, Building2, CheckCircle2, Mail, Activity, Megaphone, Plus } from "lucide-react";
 import { prisma } from "@/lib/db";
+import { requirePageUser } from "@/lib/auth/currentUser";
+import { isAdmin, ownedBy } from "@/lib/auth/access";
 import { summarizeJobInput } from "@/lib/jobSummary";
+import { getTeamStats } from "@/lib/teamStats";
 import { Button } from "@/components/Button";
+import { TeamStats } from "@/components/TeamStats";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ProgressBar } from "@/components/ProgressBar";
 
@@ -41,15 +45,26 @@ function StatCard({
 }
 
 export default async function DashboardPage() {
-  const [totalProducts, totalBrands, brandsEnriched, emailsFound, adLibraryBrands, jobsRunning, recentJobs] =
+  const user = await requirePageUser();
+  const scope = ownedBy(user);
+  const admin = isAdmin(user);
+
+  const [totalProducts, totalBrands, brandsEnriched, emailsFound, adLibraryBrands, jobsRunning, recentJobs, team] =
     await Promise.all([
-      prisma.product.count(),
-      prisma.brand.count(),
-      prisma.brand.count({ where: { enrichmentStatus: { not: "NOT_STARTED" } } }),
-      prisma.brand.count({ where: { email: { not: null } } }),
-      prisma.metaAdBrand.count(),
-      prisma.scrapeJob.count({ where: { status: "RUNNING" } }),
-      prisma.scrapeJob.findMany({ orderBy: { createdAt: "desc" }, take: 10 }),
+      prisma.product.count({ where: scope }),
+      prisma.brand.count({ where: scope }),
+      prisma.brand.count({ where: { ...scope, enrichmentStatus: { not: "NOT_STARTED" } } }),
+      prisma.brand.count({ where: { ...scope, email: { not: null } } }),
+      prisma.metaAdBrand.count({ where: scope }),
+      prisma.scrapeJob.count({ where: { ...scope, status: "RUNNING" } }),
+      prisma.scrapeJob.findMany({
+        where: scope,
+        orderBy: { createdAt: "desc" },
+        take: 10,
+        include: { user: { select: { email: true } } },
+      }),
+      // Only an admin gets the per-person breakdown.
+      admin ? getTeamStats() : null,
     ]);
 
   return (
@@ -58,7 +73,9 @@ export default async function DashboardPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Dashboard</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Amazon leads for ReviewBoost outreach, at a glance.
+            {admin
+              ? "Everyone's Amazon leads for ReviewBoost outreach, at a glance."
+              : "Your Amazon leads for ReviewBoost outreach, at a glance."}
           </p>
         </div>
         <Link href="/scrape/new">
@@ -77,6 +94,8 @@ export default async function DashboardPage() {
         <StatCard label="Ad Library brands" value={adLibraryBrands} icon={Megaphone} tint="violet" />
         <StatCard label="Jobs running" value={jobsRunning} icon={Activity} tint="rose" />
       </div>
+
+      {team && <TeamStats rows={team} />}
 
       <div className="rounded-2xl border border-slate-200/70 bg-white shadow-sm shadow-slate-200/50">
         <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
@@ -98,6 +117,7 @@ export default async function DashboardPage() {
                 <th className="px-6 py-2.5 font-medium">Progress</th>
                 <th className="px-6 py-2.5 font-medium">Started</th>
                 <th className="px-6 py-2.5 font-medium">Finished</th>
+                {admin && <th className="px-6 py-2.5 font-medium">Owner</th>}
               </tr>
             </thead>
             <tbody>
@@ -126,10 +146,13 @@ export default async function DashboardPage() {
                   </td>
                   <td className="px-6 py-3 text-slate-500">{job.createdAt.toLocaleString()}</td>
                   <td className="px-6 py-3 text-slate-500">
-                    {job.status === "COMPLETED" || job.status === "FAILED"
-                      ? job.updatedAt.toLocaleString()
-                      : "—"}
+                    {job.status === "PENDING" || job.status === "RUNNING"
+                      ? "—"
+                      : job.updatedAt.toLocaleString()}
                   </td>
+                  {admin && (
+                    <td className="px-6 py-3 text-slate-500">{job.user?.email ?? "unassigned"}</td>
+                  )}
                 </tr>
               ))}
             </tbody>

@@ -3,6 +3,7 @@ import { after } from "next/server";
 import { createScrapeJob } from "@/lib/jobs";
 import { runMetaAdsSearchJob } from "@/lib/metaAds/runMetaAdsSearchJob";
 import { withErrorHandling } from "@/lib/apiHandler";
+import { requireUser } from "@/lib/auth/currentUser";
 import type { Prisma } from "@/lib/generated/prisma/client";
 import type {
   ApiErrorResponse,
@@ -12,6 +13,8 @@ import type {
 } from "@/lib/types";
 
 export const POST = withErrorHandling(async (request: Request) => {
+  const user = await requireUser();
+
   let body: StartMetaAdsSearchRequest;
   try {
     body = await request.json();
@@ -31,7 +34,7 @@ export const POST = withErrorHandling(async (request: Request) => {
   const minActiveAds = Number.isFinite(minActiveAdsRaw) && minActiveAdsRaw > 0 ? Math.trunc(minActiveAdsRaw) : 1;
 
   const input: MetaAdsSearchInput = { keyword, minActiveAds };
-  const job = await createScrapeJob("META_ADS_SEARCH", input as unknown as Prisma.InputJsonValue);
+  const job = await createScrapeJob("META_ADS_SEARCH", input as unknown as Prisma.InputJsonValue, user.id);
 
   after(() => runMetaAdsSearchJob(job.id));
 

@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/Button";
+import { MARKETPLACES, MARKETPLACE_CODES } from "@/lib/amazon/marketplaces";
 import type { JobOption } from "@/lib/types";
 
 const BRAND_STATUS_OPTIONS = [
@@ -29,6 +30,7 @@ export function ProductsFilterBar({
   const searchParams = useSearchParams();
 
   const [q, setQ] = useState(searchParams.get("q") ?? "");
+  const [marketplace, setMarketplace] = useState(searchParams.get("marketplace") ?? "");
   const [brandStatus, setBrandStatus] = useState(searchParams.get("brandStatus") ?? "");
   const [minScore, setMinScore] = useState(searchParams.get("minScore") ?? "");
   const [maxScore, setMaxScore] = useState(searchParams.get("maxScore") ?? "");
@@ -39,6 +41,7 @@ export function ProductsFilterBar({
     event.preventDefault();
     const params = new URLSearchParams();
     if (q.trim()) params.set("q", q.trim());
+    if (marketplace) params.set("marketplace", marketplace);
     if (brandStatus) params.set("brandStatus", brandStatus);
     if (minScore) params.set("minScore", minScore);
     if (maxScore) params.set("maxScore", maxScore);
@@ -61,12 +64,27 @@ export function ProductsFilterBar({
         <input className={inputClass} value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
       <div className="flex flex-col gap-1">
+        <label className="text-xs font-medium text-slate-500">Marketplace</label>
+        <select
+          className={inputClass}
+          value={marketplace}
+          onChange={(e) => setMarketplace(e.target.value)}
+        >
+          <option value="">Any</option>
+          {MARKETPLACE_CODES.map((code) => (
+            <option key={code} value={code}>
+              {MARKETPLACES[code].label} ({MARKETPLACES[code].domain})
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="flex flex-col gap-1">
         <label className="text-xs font-medium text-slate-500">Search (job)</label>
         <select className={inputClass} value={jobId} onChange={(e) => setJobId(e.target.value)}>
           <option value="">All searches</option>
           {jobOptions.map((job) => (
             <option key={job.id} value={job.id}>
-              {job.label} ({job.productCount})
+              {job.label} ({job.count})
             </option>
           ))}
         </select>

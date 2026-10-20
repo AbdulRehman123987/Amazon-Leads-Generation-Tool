@@ -3,6 +3,7 @@ import { ImageOff, Check, MessageSquare, TrendingDown } from "lucide-react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ScoreBadge } from "@/components/ScoreBadge";
 import { topLevelCategory } from "@/lib/category";
+import { MARKETPLACES } from "@/lib/amazon/marketplaces";
 import type { ProductRow } from "@/lib/types";
 
 export function ProductCard({
@@ -66,6 +67,12 @@ export function ProductCard({
         </a>
         <div className="flex items-center gap-2">
           <p className="font-mono text-xs text-slate-400">{product.asin}</p>
+          <span
+            className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-slate-500"
+            title={MARKETPLACES[product.marketplace].domain}
+          >
+            {product.marketplace}
+          </span>
           {product.category && (
             <Link
               href={`/products?category=${encodeURIComponent(topLevelCategory(product.category) ?? "")}`}
@@ -106,6 +113,11 @@ export function ProductCard({
           )}
           {product.brand && <StatusBadge status={product.brand.enrichmentStatus} />}
         </div>
+        {product.ownerEmail !== undefined && (
+          <p className="truncate text-[11px] text-slate-400" title={product.ownerEmail ?? undefined}>
+            {product.ownerEmail ?? "unassigned"}
+          </p>
+        )}
       </div>
     </div>
   );

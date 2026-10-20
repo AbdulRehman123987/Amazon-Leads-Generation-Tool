@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // The portable zip's staging folder (npm run package) holds a built copy of the app.
+    "dist/**",
   ]),
 ]);
 

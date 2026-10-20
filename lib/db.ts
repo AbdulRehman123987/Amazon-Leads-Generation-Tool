@@ -1,27 +1,12 @@
 import { PrismaClient } from "@/lib/generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { sslFor } from "@/lib/dbSsl";
 
 // Prisma 7 requires an explicit driver adapter — plain `pg` works against any
 // Postgres-compatible provider (local Postgres, Supabase, Neon, RDS, etc.),
 // so swapping providers is just a DATABASE_URL change.
 declare global {
   var __prisma: PrismaClient | undefined;
-}
-
-// Supabase's pooler accepts plain-text connections, which would send the
-// password exchange and every lead over the internet unencrypted, so TLS is
-// switched on for Supabase hosts. Its certificate chain isn't in Node's trust
-// store though (standard verification fails with SELF_SIGNED_CERT_IN_CHAIN),
-// so the chain isn't verified. Don't add `sslmode=` to DATABASE_URL — it would
-// override this with strict verification and fail the same way. Local Postgres
-// is left unencrypted.
-function sslFor(connectionString: string) {
-  try {
-    const { hostname } = new URL(connectionString);
-    return /\.supabase\.(com|co)$/.test(hostname) ? { rejectUnauthorized: false } : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 function createPrismaClient(): PrismaClient {
@@ -31,17 +16,18 @@ function createPrismaClient(): PrismaClient {
       "DATABASE_URL is not set. Copy .env.example to .env.local and fill it in."
     );
   }
-  const adapter = new PrismaPg({ connectionString, ssl: sslFor(connectionString) });
+  // A small pool: with several copies of the app sharing one Supabase project
+  // (each team member's PC), the pooler's connection limit is the bottleneck.
+  const adapter = new PrismaPg({ connectionString, ssl: sslFor(connectionString), max: 5 });
   return new PrismaClient({ adapter });
 }
 
-// Reused across hot-reloads in dev so we don't exhaust DB connections.
+// One client (one connection pool) per process. Cached on globalThis in every
+// environment: in dev so hot reloads reuse it, and in production because this
+// lazy proxy has no other module-level instance — without the cache every
+// property access would build a new client and open new connections.
 function getPrismaClient(): PrismaClient {
-  if (!global.__prisma) {
-    const client = createPrismaClient();
-    if (process.env.NODE_ENV !== "production") global.__prisma = client;
-    return client;
-  }
+  global.__prisma ??= createPrismaClient();
   return global.__prisma;
 }
 

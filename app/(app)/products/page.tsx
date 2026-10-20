@@ -2,8 +2,11 @@ import Link from "next/link";
 import { Download, PackageSearch, X } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { BrandEnrichmentStatus, type Prisma } from "@/lib/generated/prisma/client";
+import { requirePageUser } from "@/lib/auth/currentUser";
+import { isAdmin, ownedBy } from "@/lib/auth/access";
 import { jobLabel } from "@/lib/jobs";
 import { topLevelCategory } from "@/lib/category";
+import { parseMarketplace } from "@/lib/amazon/marketplaces";
 import { ProductsFilterBar } from "@/components/ProductsFilterBar";
 import { SearchChips } from "@/components/SearchChips";
 import { ProductsGrid } from "@/components/ProductsGrid";
@@ -29,6 +32,9 @@ export default async function ProductsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const user = await requirePageUser();
+  const scope = ownedBy(user);
+  const admin = isAdmin(user);
   const params = await searchParams;
   const get = (key: string) => {
     const value = params[key];
@@ -36,6 +42,7 @@ export default async function ProductsPage({
   };
 
   const q = get("q");
+  const marketplace = parseMarketplace(get("marketplace")) ?? undefined;
   const brandStatusRaw = get("brandStatus");
   const brandStatus = VALID_BRAND_STATUSES.has(brandStatusRaw)
     ? (brandStatusRaw as BrandEnrichmentStatus)
@@ -49,7 +56,9 @@ export default async function ProductsPage({
   const sortParam = get("sort") || "-lowSaleScore";
 
   const where: Prisma.ProductWhereInput = {
+    ...scope,
     ...(q ? { title: { contains: q, mode: "insensitive" } } : {}),
+    ...(marketplace ? { marketplace } : {}),
     ...(minScore || maxScore
       ? {
           lowSaleScore: {
@@ -71,26 +80,31 @@ export default async function ProductsPage({
       orderBy: parseSort(sortParam),
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
-      include: { brand: { select: { id: true, displayName: true, enrichmentStatus: true } } },
+      include: {
+        brand: { select: { id: true, displayName: true, enrichmentStatus: true } },
+        user: { select: { email: true } },
+      },
     }),
     prisma.scrapeJob.findMany({
-      where: { type: "AMAZON_SEARCH", products: { some: {} } },
+      where: { ...scope, type: "AMAZON_SEARCH", products: { some: {} } },
       orderBy: { createdAt: "desc" },
       include: { _count: { select: { products: true } } },
       take: 20,
     }),
     prisma.product.findMany({
-      where: { category: { not: null } },
+      where: { ...scope, category: { not: null } },
       select: { category: true },
       distinct: ["category"],
     }),
-    brandId ? prisma.brand.findUnique({ where: { id: brandId }, select: { displayName: true } }) : null,
+    brandId
+      ? prisma.brand.findFirst({ where: { id: brandId, ...scope }, select: { displayName: true } })
+      : null,
   ]);
 
   const jobOptions: JobOption[] = searchJobs.map((job) => ({
     id: job.id,
     label: jobLabel(job),
-    productCount: job._count.products,
+    count: job._count.products,
   }));
 
   const categoryOptions = [
@@ -100,6 +114,7 @@ export default async function ProductsPage({
   const rows: ProductRow[] = products.map((product) => ({
     id: product.id,
     asin: product.asin,
+    marketplace: product.marketplace,
     title: product.title,
     url: product.url,
     imageUrl: product.imageUrl,
@@ -111,10 +126,12 @@ export default async function ProductsPage({
     lowSaleScore: product.lowSaleScore,
     scrapeJobId: product.scrapeJobId,
     brand: product.brand,
+    ...(admin ? { ownerEmail: product.user?.email ?? null } : {}),
   }));
 
   const baseParams = new URLSearchParams();
   if (q) baseParams.set("q", q);
+  if (marketplace) baseParams.set("marketplace", marketplace);
   if (brandStatus) baseParams.set("brandStatus", brandStatus);
   if (minScore) baseParams.set("minScore", minScore);
   if (maxScore) baseParams.set("maxScore", maxScore);
@@ -196,7 +213,7 @@ export default async function ProductsPage({
         <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-slate-200 bg-white py-16 text-center">
           <PackageSearch className="h-8 w-8 text-slate-300" />
           <p className="text-sm text-slate-500">
-            {jobId || brandId || q || category || brandStatus
+            {jobId || brandId || q || category || brandStatus || marketplace
               ? "No products match these filters."
               : "No products yet — start a scrape."}
           </p>
