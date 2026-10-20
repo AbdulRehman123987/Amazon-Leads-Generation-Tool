@@ -1,4 +1,4 @@
-import { scrapeDoFetch, ScrapeDoError } from "@/lib/scrapeDo";
+import { scrapeDoFetch, ScrapeDoError, ScrapeDoKeyError } from "@/lib/scrapeDo";
 import { parseGoogleOrganicResults, type OrganicResult } from "@/lib/enrichment/googleSearch";
 import { parseBingResults } from "@/lib/enrichment/bingSearch";
 import { pickBestCandidate } from "@/lib/enrichment/pickWebsite";
@@ -77,7 +77,8 @@ function describeError(err: unknown): string {
  * for a second fetch of the same page.
  */
 async function guessDomainWebsite(
-  displayName: string
+  displayName: string,
+  apiKey: string
 ): Promise<{ site: { url: string; html: string } | null; networkFailure: boolean }> {
   const slug = displayName.toLowerCase().replace(/[^a-z0-9]/g, "");
   if (!slug) return { site: null, networkFailure: false };
@@ -85,8 +86,10 @@ async function guessDomainWebsite(
 
   let result: Awaited<ReturnType<typeof scrapeDoFetch>>;
   try {
-    result = await scrapeDoFetch(guessUrl, { timeoutMs: PAGE_FETCH_TIMEOUT_MS });
+    result = await scrapeDoFetch(guessUrl, apiKey, { timeoutMs: PAGE_FETCH_TIMEOUT_MS });
   } catch (err) {
+    // A refused key isn't "a wrong guess": it would fail every lookup, so stop.
+    if (err instanceof ScrapeDoKeyError) throw err;
     // wrong guess or genuinely unreachable — scrape.do doesn't bill failures
     return { site: null, networkFailure: isNetworkFailure(err) };
   }
@@ -104,27 +107,30 @@ async function guessDomainWebsite(
  */
 async function searchWeb(
   query: string,
-  notes: string[]
+  notes: string[],
+  apiKey: string
 ): Promise<{ results: OrganicResult[]; incomplete: boolean }> {
   const encoded = encodeURIComponent(query);
 
   try {
-    const { html } = await scrapeDoFetch(`https://www.bing.com/search?q=${encoded}`, {
+    const { html } = await scrapeDoFetch(`https://www.bing.com/search?q=${encoded}`, apiKey, {
       timeoutMs: SEARCH_FETCH_TIMEOUT_MS,
     });
     const parsed = parseBingResults(html);
     if (!parsed.unreadable) return { results: parsed.results, incomplete: false };
     notes.push("Bing's page couldn't be read (blocked or changed) — trying Google");
   } catch (err) {
+    if (err instanceof ScrapeDoKeyError) throw err;
     notes.push(`Bing search failed: ${describeError(err)}`);
     // If scrape.do itself is unreachable, a 10-credit Google fetch would fail the same way.
     if (isNetworkFailure(err)) return { results: [], incomplete: true };
   }
 
   try {
-    const { html } = await scrapeDoFetch(`https://www.google.com/search?q=${encoded}`, { render: true });
+    const { html } = await scrapeDoFetch(`https://www.google.com/search?q=${encoded}`, apiKey, { render: true });
     return { results: parseGoogleOrganicResults(html), incomplete: false };
   } catch (err) {
+    if (err instanceof ScrapeDoKeyError) throw err;
     notes.push(`Google search failed: ${describeError(err)}`);
     return { results: [], incomplete: isNetworkFailure(err) };
   }
@@ -138,12 +144,15 @@ export { computeEnrichmentStatus } from "@/lib/brandStatus";
  * never overwritten), then crawls the homepage + a contact/about page for an
  * email/phone. Logs each step to the job (jobId) as it happens — some of
  * these fetches can take tens of seconds, so without incremental logging a
- * slow entity looks identical to a stuck job.
+ * slow entity looks identical to a stuck job. Every fetch runs on `apiKey`
+ * (the job owner's scrape.do key); a ScrapeDoKeyError — the key itself was
+ * refused — is thrown to the caller, never recorded as "nothing found".
  */
 export async function findContactInfo(
   jobId: string,
   label: string,
-  existingWebsiteUrl: string | null
+  existingWebsiteUrl: string | null,
+  apiKey: string
 ): Promise<ContactInfoResult> {
   const notes: string[] = [];
   let websiteUrl = existingWebsiteUrl;
@@ -159,7 +168,7 @@ export async function findContactInfo(
   }
 
   if (!websiteUrl) {
-    const guess = await guessDomainWebsite(label);
+    const guess = await guessDomainWebsite(label, apiKey);
     if (guess.networkFailure) incomplete = true;
     if (guess.site) {
       websiteUrl = guess.site.url;
@@ -174,7 +183,7 @@ export async function findContactInfo(
       notes.push(`Search query: ${query}`);
       await appendJobLog(jobId, `${label}: searching the web for an official website`);
 
-      const search = await searchWeb(query, notes);
+      const search = await searchWeb(query, notes, apiKey);
       if (search.incomplete) {
         incomplete = true;
         await appendJobLog(jobId, `${label}: search couldn't reach scrape.do — will retry on the next run`, "warn");
@@ -220,7 +229,7 @@ export async function findContactInfo(
     } else {
       await appendJobLog(jobId, `${label}: fetching homepage ${websiteUrl}`);
       try {
-        const { html } = await scrapeDoFetch(websiteUrl, { timeoutMs: PAGE_FETCH_TIMEOUT_MS });
+        const { html } = await scrapeDoFetch(websiteUrl, apiKey, { timeoutMs: PAGE_FETCH_TIMEOUT_MS });
         if (websiteFromSearch && isParkedPage(html)) {
           notes.push(`Rejected ${websiteUrl} — a parked / for-sale domain, not the brand's site`);
           await appendJobLog(jobId, `${label}: ${websiteUrl} is a parked domain — discarded`, "warn");
@@ -233,6 +242,7 @@ export async function findContactInfo(
           if (email || phone) contactPageUrl = websiteUrl;
         }
       } catch (err) {
+        if (err instanceof ScrapeDoKeyError) throw err;
         domainReachable = false;
         if (isNetworkFailure(err)) incomplete = true;
         notes.push(`Homepage fetch failed (${websiteUrl}): ${describeError(err)}`);
@@ -262,7 +272,7 @@ export async function findContactInfo(
       await sleep(INTER_REQUEST_DELAY_MS);
       await appendJobLog(jobId, `${label}: trying ${pageUrl}`);
       try {
-        const { html, targetStatusCode } = await scrapeDoFetch(pageUrl, {
+        const { html, targetStatusCode } = await scrapeDoFetch(pageUrl, apiKey, {
           timeoutMs: PAGE_FETCH_TIMEOUT_MS,
         });
         if (targetStatusCode >= 400) continue; // path doesn't exist on this site — skip quietly
@@ -275,6 +285,7 @@ export async function findContactInfo(
           notes.push(`Found contact info on ${pageUrl}`);
         }
       } catch (err) {
+        if (err instanceof ScrapeDoKeyError) throw err;
         if (err instanceof ScrapeDoError && (err.statusCode === 404 || err.statusCode === 410)) continue; // no such page
         if (isNetworkFailure(err)) incomplete = true;
         notes.push(`Fetch failed for ${pageUrl}: ${describeError(err)}`);

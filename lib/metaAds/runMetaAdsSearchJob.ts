@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
-import { searchMetaAdLibrary } from "@/lib/searchApi";
+import { searchMetaAdLibrary, SearchApiKeyError } from "@/lib/searchApi";
+import { jobFailureMessage, keySourceNote, resolveApiKey, type KeySource } from "@/lib/apiKeys";
 import {
   setJobStatus,
   setJobTotal,
@@ -36,6 +37,7 @@ export async function runMetaAdsSearchJob(jobId: string): Promise<void> {
 
   const input = job.input as unknown as MetaAdsSearchInput;
   const userId = job.userId;
+  let keySource: KeySource = "shared";
 
   async function wasStopped(): Promise<boolean> {
     if (!(await isJobCancelled(jobId))) return false;
@@ -46,11 +48,17 @@ export async function runMetaAdsSearchJob(jobId: string): Promise<void> {
   try {
     if (await isJobCancelled(jobId)) return; // stopped before it even started
 
+    // The search runs on the owner's own SearchAPI.io key when they saved one.
+    const resolved = await resolveApiKey("searchApi", userId);
+    const apiKey = resolved.key;
+    keySource = resolved.source;
+
     await setJobStatus(
       jobId,
       "RUNNING",
       `Searching Meta Ad Library for "${input.keyword}" (${input.minActiveAds}+ active ads)`
     );
+    await appendJobLog(jobId, keySourceNote("searchApi", keySource));
 
     const countsByPage = new Map<string, AggregatedPage>();
     let pageToken: string | undefined;
@@ -63,11 +71,12 @@ export async function runMetaAdsSearchJob(jobId: string): Promise<void> {
 
       let result;
       try {
-        result = await searchMetaAdLibrary(input.keyword, {
+        result = await searchMetaAdLibrary(input.keyword, apiKey, {
           activeStatus: "active",
           pageToken,
         });
       } catch (err) {
+        if (err instanceof SearchApiKeyError) throw err;
         await appendJobLog(jobId, `Fetch failed on page ${page}: ${(err as Error).message}`, "error");
         break;
       }
@@ -164,6 +173,6 @@ export async function runMetaAdsSearchJob(jobId: string): Promise<void> {
       `Job finished: ${qualifying.length} advertiser(s) with ${input.minActiveAds}+ active ads`
     );
   } catch (err) {
-    await setJobStatus(jobId, "FAILED", `Job failed: ${(err as Error).message}`);
+    await setJobStatus(jobId, "FAILED", `Job failed: ${jobFailureMessage(err, "searchApi", keySource)}`);
   }
 }

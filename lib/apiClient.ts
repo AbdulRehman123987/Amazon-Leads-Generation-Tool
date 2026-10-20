@@ -1,6 +1,6 @@
 async function requestJson<TResponse>(
   url: string,
-  method: "POST" | "PATCH",
+  method: "POST" | "PATCH" | "PUT" | "DELETE",
   body: unknown
 ): Promise<TResponse> {
   const res = await fetch(url, {
@@ -24,3 +24,9 @@ export const postJson = <TResponse>(url: string, body: unknown) =>
 
 export const patchJson = <TResponse>(url: string, body: unknown) =>
   requestJson<TResponse>(url, "PATCH", body);
+
+export const putJson = <TResponse>(url: string, body: unknown) =>
+  requestJson<TResponse>(url, "PUT", body);
+
+export const deleteJson = <TResponse>(url: string, body: unknown) =>
+  requestJson<TResponse>(url, "DELETE", body);

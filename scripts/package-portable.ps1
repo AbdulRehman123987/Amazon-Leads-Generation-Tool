@@ -50,7 +50,7 @@ Copy-Item (Get-Command node).Source (Join-Path $pkg "node\node.exe")
 
 # Only what the running app reads: not DIRECT_URL (migrations are run by the
 # admin) and not the Docker-only POSTGRES_* settings.
-$keep = '^(DATABASE_URL|AUTH_SECRET|SCRAPE_DO_API_KEY|SEARCHAPI_API_KEY|HUNTER_API_KEY|GOOGLE_CSE_API_KEY|GOOGLE_CSE_CX)='
+$keep = '^(DATABASE_URL|AUTH_SECRET|API_KEY_SECRET|REQUIRE_OWN_API_KEYS|SCRAPE_DO_API_KEY|SEARCHAPI_API_KEY|HUNTER_API_KEY|GOOGLE_CSE_API_KEY|GOOGLE_CSE_CX)='
 $lines = Get-Content ".env" | Where-Object { $_ -match $keep }
 if (-not ($lines | Where-Object { $_ -match '^DATABASE_URL=.+' })) { throw "DATABASE_URL is empty in .env" }
 if (-not ($lines | Where-Object { $_ -match '^AUTH_SECRET=.{32,}' })) { throw "AUTH_SECRET is missing or too short in .env (npm run user -- secret)" }

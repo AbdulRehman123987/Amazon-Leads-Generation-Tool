@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser, NotSignedInError } from "@/lib/auth/currentUser";
+import { MissingApiKeyError } from "@/lib/apiKeys";
 import type { ApiErrorResponse } from "@/lib/types";
 
 /**
@@ -23,6 +24,11 @@ export function withErrorHandling<Args extends unknown[]>(
       if (err instanceof NotSignedInError) {
         const body: ApiErrorResponse = { error: "Not signed in" };
         return NextResponse.json(body, { status: 401 });
+      }
+      // No scrape.do / SearchAPI.io key to run on — the message says what to do.
+      if (err instanceof MissingApiKeyError) {
+        const body: ApiErrorResponse = { error: err.message };
+        return NextResponse.json(body, { status: 400 });
       }
       console.error(err);
       const body: ApiErrorResponse = {

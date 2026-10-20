@@ -8,6 +8,8 @@
  * particularly parseSearchResponse's field mapping.
  */
 
+import type { ApiKeyProblem } from "@/lib/types";
+
 const SEARCHAPI_BASE_URL = "https://www.searchapi.io/api/v1/search";
 const REQUEST_TIMEOUT_MS = 30_000;
 
@@ -37,6 +39,24 @@ export class SearchApiError extends Error {
   ) {
     super(message);
     this.name = "SearchApiError";
+  }
+}
+
+/**
+ * SearchAPI.io turned the request away because of the API key (401 = not a
+ * valid key; 402/403 = no credits left or the plan can't do this search), so
+ * every further request would fail the same way — callers stop.
+ */
+export class SearchApiKeyError extends SearchApiError {
+  constructor(
+    statusCode: number,
+    public readonly reason: ApiKeyProblem
+  ) {
+    super(
+      reason === "no-credits" ? "SearchAPI.io refused the request (no credits left)" : "SearchAPI.io rejected the API key",
+      statusCode
+    );
+    this.name = "SearchApiKeyError";
   }
 }
 
@@ -91,18 +111,15 @@ function parseSearchResponse(json: unknown): MetaAdLibrarySearchResult {
  * Searches the Meta Ad Library for ads matching `keyword`. Defaults to only
  * currently-active ads (active_status=active) since that's the whole point
  * of this app's "N ads currently running" filter.
+ * `apiKey` is whoever started the search's key (see lib/apiKeys.ts) — never
+ * read from the environment here. Throws SearchApiKeyError when SearchAPI.io
+ * refuses the key.
  */
 export async function searchMetaAdLibrary(
   keyword: string,
+  apiKey: string,
   options: { activeStatus?: "active" | "inactive" | "all"; pageToken?: string } = {}
 ): Promise<MetaAdLibrarySearchResult> {
-  const apiKey = process.env.SEARCHAPI_API_KEY;
-  if (!apiKey) {
-    throw new Error(
-      "SEARCHAPI_API_KEY is not set. Add it to .env.local (see .env.example)."
-    );
-  }
-
   const params = new URLSearchParams({
     engine: "meta_ad_library",
     q: keyword,
@@ -132,6 +149,8 @@ export async function searchMetaAdLibrary(
   clearTimeout(timer);
 
   const body = await response.text();
+  if (response.status === 401) throw new SearchApiKeyError(401, "invalid");
+  if (response.status === 402 || response.status === 403) throw new SearchApiKeyError(response.status, "no-credits");
   if (!response.ok) {
     throw new SearchApiError(
       `SearchAPI.io returned ${response.status} for "${keyword}": ${body.slice(0, 300)}`,

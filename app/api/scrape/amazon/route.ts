@@ -4,6 +4,7 @@ import { createScrapeJob } from "@/lib/jobs";
 import { runAmazonSearchJob } from "@/lib/amazon/runSearchJob";
 import { withErrorHandling } from "@/lib/apiHandler";
 import { requireUser } from "@/lib/auth/currentUser";
+import { resolveApiKey } from "@/lib/apiKeys";
 import {
   DEFAULT_MARKETPLACE,
   MARKETPLACES,
@@ -32,6 +33,8 @@ function positiveIntOrUndefined(value: unknown): number | undefined {
 
 export const POST = withErrorHandling(async (request: Request) => {
   const user = await requireUser();
+  // Tell them now, not from the job's log, if there is no scrape.do key to run on.
+  await resolveApiKey("scrapeDo", user.id);
 
   let body: StartAmazonScrapeRequest;
   try {

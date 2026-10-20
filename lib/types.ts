@@ -10,6 +10,17 @@ import type {
 } from "@/lib/generated/prisma/client";
 import type { MarketplaceCode } from "@/lib/amazon/marketplaces";
 
+/** Why scrape.do or SearchAPI.io turned a request away because of the API key itself. */
+export type ApiKeyProblem = "invalid" | "no-credits";
+
+/**
+ * Where one of a person's API keys stands: "own" = they saved one; "shared" =
+ * none saved, the team's shared key is used; "required" = none saved and they
+ * must add one; "missing" = none saved and there is no shared key either;
+ * "unreadable" = one is saved but can't be decrypted any more.
+ */
+export type ApiKeyState = "own" | "shared" | "required" | "missing" | "unreadable";
+
 export interface JobLogEntry {
   timestamp: string; // ISO 8601
   level: "info" | "warn" | "error";
@@ -86,7 +97,28 @@ export interface UpdateBrandRequest {
   enrichmentStatus?: string;
 }
 
+/** Saves (or replaces) the signed-in person's own key for one service. */
+export interface SaveApiKeyRequest {
+  /** "scrapeDo" or "searchApi". */
+  kind: string;
+  key: string;
+}
+
+export interface RemoveApiKeyRequest {
+  kind: string;
+}
+
 // ---- API response bodies ----
+
+export interface SaveApiKeyResponse {
+  ok: true;
+  /** "••••1234" — the only part of a saved key that is ever shown again. */
+  hint: string;
+  /** The service confirmed the key; false when it couldn't be reached to check. */
+  verified: boolean;
+  /** Credits the service says are left, when it said. */
+  creditsLeft: number | null;
+}
 
 export interface StartJobResponse {
   jobId: string;

@@ -6,6 +6,7 @@ import { runMetaAdsEnrichmentJob } from "@/lib/metaAds/runMetaAdsEnrichmentJob";
 import { withErrorHandling } from "@/lib/apiHandler";
 import { requireUser } from "@/lib/auth/currentUser";
 import { ownedBy } from "@/lib/auth/access";
+import { resolveApiKey } from "@/lib/apiKeys";
 import type { Prisma } from "@/lib/generated/prisma/client";
 import type {
   ApiErrorResponse,
@@ -16,6 +17,8 @@ import type {
 
 export const POST = withErrorHandling(async (request: Request) => {
   const user = await requireUser();
+  // The contact lookup runs on scrape.do. Tell them now if there is no key to run on.
+  await resolveApiKey("scrapeDo", user.id);
   // Only rows the caller can see (their own; an admin's view is everyone's).
   const scope = ownedBy(user);
 

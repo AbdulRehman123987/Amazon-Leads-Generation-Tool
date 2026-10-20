@@ -17,6 +17,19 @@ function Count({ value }: { value: number }) {
   return value === 0 ? <span className="text-slate-300">0</span> : <>{value.toLocaleString()}</>;
 }
 
+function KeyChip({ label, saved }: { label: string; saved: boolean }) {
+  return (
+    <span
+      title={saved ? `Has saved their own ${label} key` : `No own ${label} key — uses the shared one`}
+      className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+        saved ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-400"
+      }`}
+    >
+      {label}
+    </span>
+  );
+}
+
 function StatusBar({ stats }: { stats: TeamMemberStats }) {
   if (stats.brands === 0) return null;
   return (
@@ -50,7 +63,7 @@ export function TeamStats({ rows }: { rows: TeamMemberStats[] }) {
         </p>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[1000px] border-collapse text-sm">
+        <table className="w-full min-w-[1150px] border-collapse text-sm">
           <thead>
             <tr className="text-left text-xs font-medium text-slate-400">
               <th className="px-6 py-2.5 font-medium">Employee</th>
@@ -69,6 +82,12 @@ export function TeamStats({ rows }: { rows: TeamMemberStats[] }) {
               <th className={HEADER} title="Brands that went out in a CSV export">Exported</th>
               <th className={HEADER} title="Advertisers found in the Ad Library, and how many of them have contact details">
                 Ad Library
+              </th>
+              <th
+                className={HEADER}
+                title="Whether they saved their own scrape.do and SearchAPI.io keys (otherwise they use the shared ones)"
+              >
+                Own keys
               </th>
               <th className={HEADER}>Last active</th>
             </tr>
@@ -144,6 +163,16 @@ export function TeamStats({ rows }: { rows: TeamMemberStats[] }) {
                     {stats.adLibraryBrands > 0 && (
                       <div className="whitespace-nowrap text-[11px] text-slate-400">
                         {stats.adLibraryWithContact} with contact
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-4 py-3.5">
+                    {stats.userId === null ? (
+                      <span className="text-slate-300">—</span>
+                    ) : (
+                      <div className="flex flex-wrap gap-1">
+                        <KeyChip label="scrape.do" saved={stats.hasScrapeDoKey} />
+                        <KeyChip label="SearchAPI" saved={stats.hasSearchApiKey} />
                       </div>
                     )}
                   </td>

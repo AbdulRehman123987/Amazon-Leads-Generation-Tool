@@ -28,6 +28,9 @@ export interface TeamMemberStats {
   adLibraryBrands: number;
   /** Ad Library brands whose lookup found a website and/or an email. */
   adLibraryWithContact: number;
+  /** Whether they saved their own scrape.do / SearchAPI.io key (the keys themselves never leave the server). */
+  hasScrapeDoKey: boolean;
+  hasSearchApiKey: boolean;
 }
 
 function blank(userId: string | null): TeamMemberStats {
@@ -49,6 +52,8 @@ function blank(userId: string | null): TeamMemberStats {
     exported: 0,
     adLibraryBrands: 0,
     adLibraryWithContact: 0,
+    hasScrapeDoKey: false,
+    hasSearchApiKey: false,
   };
 }
 
@@ -64,7 +69,10 @@ export async function getTeamStats(): Promise<TeamMemberStats[]> {
     brandsExported,
     adBrandsByStatus,
   ] = await Promise.all([
-    prisma.user.findMany({ select: { id: true, email: true, role: true }, orderBy: { createdAt: "asc" } }),
+    prisma.user.findMany({
+      select: { id: true, email: true, role: true, scrapeDoApiKey: true, searchApiKey: true },
+      orderBy: { createdAt: "asc" },
+    }),
     prisma.scrapeJob.groupBy({ by: ["userId", "type"], _count: { _all: true } }),
     prisma.scrapeJob.groupBy({
       by: ["userId"],
@@ -94,6 +102,9 @@ export async function getTeamStats(): Promise<TeamMemberStats[]> {
     const stats = row(user.id);
     stats.email = user.email;
     stats.role = user.role;
+    // Only whether a key is saved — never the (encrypted) key itself.
+    stats.hasScrapeDoKey = Boolean(user.scrapeDoApiKey);
+    stats.hasSearchApiKey = Boolean(user.searchApiKey);
   }
   for (const group of jobsByType) {
     const stats = row(group.userId);

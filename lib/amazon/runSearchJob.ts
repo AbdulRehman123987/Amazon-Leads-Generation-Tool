@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
-import { scrapeDoFetch } from "@/lib/scrapeDo";
+import { scrapeDoFetch, ScrapeDoKeyError } from "@/lib/scrapeDo";
+import { jobFailureMessage, keySourceNote, resolveApiKey, type KeySource } from "@/lib/apiKeys";
 import { parseAmazonSearchResults, parseAmazonProductPage } from "@/lib/amazon/parse";
 import { computeLowSaleScore } from "@/lib/scoring";
 import { findOrCreateBrand } from "@/lib/brands";
@@ -43,7 +44,10 @@ function buildSearchPageUrl(input: AmazonSearchInput, marketplace: MarketplaceCo
  * matching/creating Brand rows as it goes — all owned by whoever started the
  * job. Designed to survive individual page/item failures — only a fatal,
  * unexpected error fails the whole job. Checks between pages and products
- * whether the job was stopped, and if so keeps what it has and returns.
+ * whether the job was stopped, and if so keeps what it has and returns. Runs
+ * on its owner's own scrape.do key when they saved one (else the shared key);
+ * if scrape.do refuses the key the job stops there — every other request would
+ * fail the same way — and says so.
  */
 export async function runAmazonSearchJob(jobId: string): Promise<void> {
   const job = await prisma.scrapeJob.findUnique({ where: { id: jobId } });
@@ -56,6 +60,7 @@ export async function runAmazonSearchJob(jobId: string): Promise<void> {
   const site = MARKETPLACES[marketplace];
   // Fetch pages the way a shopper in that country sees them (UK prices, UK listings).
   const fetchOptions = { render: true, ...(site.geoCode ? { geoCode: site.geoCode } : {}) };
+  let keySource: KeySource = "shared";
 
   async function wasStopped(): Promise<boolean> {
     if (!(await isJobCancelled(jobId))) return false;
@@ -66,11 +71,16 @@ export async function runAmazonSearchJob(jobId: string): Promise<void> {
   try {
     if (await isJobCancelled(jobId)) return; // stopped before it even started
 
+    const resolved = await resolveApiKey("scrapeDo", userId);
+    const apiKey = resolved.key;
+    keySource = resolved.source;
+
     await setJobStatus(
       jobId,
       "RUNNING",
       `Starting Amazon search on ${site.domain}: ${input.keyword ? `keyword "${input.keyword}"` : input.categoryUrl} (${input.maxPages} page(s))`
     );
+    await appendJobLog(jobId, keySourceNote("scrapeDo", keySource));
 
     // Phase 1: discover candidates across all requested pages before doing
     // any per-item work, so the progress bar reflects real % of total work
@@ -84,7 +94,7 @@ export async function runAmazonSearchJob(jobId: string): Promise<void> {
       await appendJobLog(jobId, `Fetching search page ${page}/${input.maxPages}`);
 
       try {
-        const { html } = await scrapeDoFetch(searchUrl, fetchOptions);
+        const { html } = await scrapeDoFetch(searchUrl, apiKey, fetchOptions);
         const items = parseAmazonSearchResults(html, marketplace);
         await appendJobLog(jobId, `Parsed ${items.length} result(s) from page ${page}`);
 
@@ -95,6 +105,7 @@ export async function runAmazonSearchJob(jobId: string): Promise<void> {
           candidatesByAsin.set(item.asin, item);
         }
       } catch (err) {
+        if (err instanceof ScrapeDoKeyError) throw err;
         await appendJobLog(
           jobId,
           `Failed to fetch/parse search page ${page}: ${(err as Error).message}`,
@@ -115,7 +126,7 @@ export async function runAmazonSearchJob(jobId: string): Promise<void> {
       if (await wasStopped()) return;
 
       try {
-        const { html } = await scrapeDoFetch(item.url, fetchOptions);
+        const { html } = await scrapeDoFetch(item.url, apiKey, fetchOptions);
         const detail = parseAmazonProductPage(html);
 
         const bsrOutOfRange =
@@ -171,6 +182,7 @@ export async function runAmazonSearchJob(jobId: string): Promise<void> {
           `Processed ${item.asin} — "${item.title.slice(0, 60)}" — score ${lowSaleScore.toFixed(2)}`
         );
       } catch (err) {
+        if (err instanceof ScrapeDoKeyError) throw err;
         await recordJobItem(jobId, `Failed on ${item.asin}: ${(err as Error).message}`, {
           isError: true,
         });
@@ -181,6 +193,6 @@ export async function runAmazonSearchJob(jobId: string): Promise<void> {
 
     await setJobStatus(jobId, "COMPLETED", `Job finished: ${candidates.length} product(s) processed`);
   } catch (err) {
-    await setJobStatus(jobId, "FAILED", `Job failed: ${(err as Error).message}`);
+    await setJobStatus(jobId, "FAILED", `Job failed: ${jobFailureMessage(err, "scrapeDo", keySource)}`);
   }
 }

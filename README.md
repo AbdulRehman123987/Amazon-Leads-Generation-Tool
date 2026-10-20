@@ -22,10 +22,15 @@ Copy `.env.example` to `.env.local` and fill in:
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `DATABASE_URL` | yes | Postgres connection string |
-| `SCRAPE_DO_API_KEY` | yes | Used for every outbound fetch (see `lib/scrapeDo.ts`) |
+| `AUTH_SECRET` | yes | Signs the login cookies (32+ characters) |
+| `SCRAPE_DO_API_KEY` | no* | The team's **shared** scrape.do key, used for every outbound fetch (see `lib/scrapeDo.ts`) by anyone without their own |
+| `SEARCHAPI_API_KEY` | no* | The team's **shared** [SearchAPI.io](https://www.searchapi.io/) key, used by `lib/searchApi.ts` for the Meta Ad Library search |
+| `API_KEY_SECRET` | no | Encrypts the keys people save in Settings; defaults to `AUTH_SECRET` (see "Each person's own API keys") |
+| `REQUIRE_OWN_API_KEYS` | no | `1` = members must add their own keys instead of using the shared ones |
 | `HUNTER_API_KEY` | no | Reserved for a future Hunter.io email-lookup provider (see below) — unused today |
 | `GOOGLE_CSE_API_KEY` / `GOOGLE_CSE_CX` | no | Reserved for an alternative to scraping Google directly — unused today |
-| `SEARCHAPI_API_KEY` | only for the Ad Library page | [SearchAPI.io](https://www.searchapi.io/) key, used by `lib/searchApi.ts` for the Meta Ad Library search |
+
+\* Needed unless every person adds their own key in Settings.
 
 ## Getting started
 
@@ -229,6 +234,38 @@ exist.
   `where` of every query on those four tables, and create rows with the
   current user's id. Forgetting it shows one person's leads to another.
 
+## Each person's own API keys
+
+The **Settings** page lets everyone save their own scrape.do key and SearchAPI.io
+key (add, replace or remove at any time). Anything they start then runs on their
+keys, so the credits come out of their own accounts:
+
+- Without one, a job uses the shared key from the environment
+  (`SCRAPE_DO_API_KEY` / `SEARCHAPI_API_KEY`). With `REQUIRE_OWN_API_KEYS=1`
+  members must have their own and are told so when they start something; the
+  admin can still use the shared ones. The job log's first lines say which key
+  it is running on.
+- A key is checked with the service when it is saved (their free account
+  endpoints: scrape.do `/info`, SearchAPI.io `/me`), then stored AES-encrypted
+  (`lib/secretBox.ts`) on the person's account. Only its last 4 characters are
+  ever shown again, and the admin can only see *whether* someone has one (the
+  "Own keys" column of Team activity).
+- Encryption uses `API_KEY_SECRET`, or `AUTH_SECRET` when that isn't set. Every
+  deployment sharing the database (Vercel, Docker, the portable zips) needs the
+  **same** value, and changing it makes saved keys unreadable — people would have
+  to enter them again (Settings says so). In the portable zip the secret and the
+  database password sit on every PC, so there it keeps keys out of dumps and
+  casual sight, not away from a technical teammate; on Vercel/Docker people
+  never see them.
+- A refused key stops the job at once with a plain message ("Your scrape.do key
+  has no credits left…") instead of failing item by item. scrape.do says so with
+  `401` + `Scrape.do-Auth: 0` (plus `Scrape.do-Remaining-Credits` when the key is
+  valid but out of credits). A lookup that couldn't run is never recorded as
+  "Not found": the brand goes back to how it was.
+- Code: `lib/apiKeys.ts` picks the key (`resolveApiKey`) and
+  `scrapeDoFetch` / `searchMetaAdLibrary` take it as an argument — they never read
+  the environment themselves, so nothing can fall back to the shared key by accident.
+
 ## Stopping a job
 
 A job that is pending or running has a **Stop** button (job page and Jobs list).
@@ -292,10 +329,12 @@ It builds and runs, with two things to know:
   plan-dependent), leaving it "running" — **Stop** it from the Jobs page. Long
   scrapes belong on the Docker/VPS setup or the portable zip.
 
-Set `DATABASE_URL` (the Supabase **transaction pooler**, port 6543), `AUTH_SECRET`,
-`SCRAPE_DO_API_KEY` and `SEARCHAPI_API_KEY` in the Vercel project's environment
-variables, and run `npx prisma migrate deploy` against Supabase before the first
-deploy of a version with schema changes.
+Set `DATABASE_URL` (the Supabase **transaction pooler**, port 6543) and `AUTH_SECRET`
+in the Vercel project's environment variables. `SCRAPE_DO_API_KEY` and
+`SEARCHAPI_API_KEY` are the shared fallback keys — optional once everyone adds
+their own in Settings (see "Each person's own API keys"). Run
+`npx prisma migrate deploy` against Supabase **before** deploying a version with
+schema changes: the new code reads the new columns.
 
 ### Docker on a VPS, with Supabase as the database
 

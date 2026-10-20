@@ -1,6 +1,15 @@
 import type { ReactNode } from "react";
 import { redirect } from "next/navigation";
-import { LayoutDashboard, Search, History, Package, Building2, Megaphone, Sparkles } from "lucide-react";
+import {
+  LayoutDashboard,
+  Search,
+  History,
+  Package,
+  Building2,
+  Megaphone,
+  Sparkles,
+  Settings,
+} from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { SignOutButton } from "@/components/SignOutButton";
 import { ToastProvider } from "@/components/Toast";
@@ -19,6 +28,7 @@ const NAV_ITEMS = [
   { href: "/products", label: "Products", icon: <Package className={ICON_CLASS} /> },
   { href: "/brands", label: "Brands", icon: <Building2 className={ICON_CLASS} /> },
   { href: "/ad-library", label: "Ad Library", icon: <Megaphone className={ICON_CLASS} /> },
+  { href: "/settings", label: "Settings", icon: <Settings className={ICON_CLASS} /> },
 ];
 
 export default async function AppLayout({ children }: { children: ReactNode }) {

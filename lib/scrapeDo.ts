@@ -5,6 +5,8 @@
  * the upstream contract this wraps.
  */
 
+import type { ApiKeyProblem } from "@/lib/types";
+
 const SCRAPE_DO_BASE_URL = "https://api.scrape.do/";
 const DEFAULT_TIMEOUT_MS = 60_000;
 const MAX_ATTEMPTS = 3;
@@ -59,6 +61,22 @@ export class ScrapeDoError extends Error {
   }
 }
 
+/**
+ * scrape.do itself turned the request away because of the API key, not the
+ * target site: it answers 401 with `Scrape.do-Auth: 0`, and a key that is valid
+ * but has no credits left also carries `Scrape.do-Remaining-Credits`. Every other
+ * request would fail the same way, so callers stop instead of going on.
+ */
+export class ScrapeDoKeyError extends ScrapeDoError {
+  constructor(public readonly reason: ApiKeyProblem) {
+    super(
+      reason === "no-credits" ? "scrape.do reports no credits left on this API key" : "scrape.do rejected the API key",
+      401
+    );
+    this.name = "ScrapeDoKeyError";
+  }
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -71,20 +89,17 @@ function parseNumericHeader(value: string | null): number | undefined {
 
 /**
  * Fetches `targetUrl` through scrape.do and returns the target page's HTML.
+ * `apiKey` is whoever started the job's key (see lib/apiKeys.ts) — never read
+ * from the environment here, so a call can't quietly fall back to the shared one.
  * Retries on a scrape.do-side 502 (their documented "please retry" signal)
  * and on connections to scrape.do that never established (flaky networks).
+ * Throws ScrapeDoKeyError when scrape.do refuses the key.
  */
 export async function scrapeDoFetch(
   targetUrl: string,
+  apiKey: string,
   options: ScrapeDoOptions = {}
 ): Promise<ScrapeDoResult> {
-  const apiKey = process.env.SCRAPE_DO_API_KEY;
-  if (!apiKey) {
-    throw new Error(
-      "SCRAPE_DO_API_KEY is not set. Add it to .env.local (see .env.example)."
-    );
-  }
-
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const params = new URLSearchParams({
     token: apiKey,
@@ -130,6 +145,10 @@ export async function scrapeDoFetch(
     clearTimeout(clientTimer);
 
     const body = await response.text();
+
+    if (response.status === 401 && response.headers.get("Scrape.do-Auth") === "0") {
+      throw new ScrapeDoKeyError(response.headers.has("Scrape.do-Remaining-Credits") ? "no-credits" : "invalid");
+    }
 
     if (response.status === 502 && attempt < MAX_ATTEMPTS) {
       await sleep(1000 * attempt);

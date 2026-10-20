@@ -4,6 +4,7 @@ import { createScrapeJob } from "@/lib/jobs";
 import { runMetaAdsSearchJob } from "@/lib/metaAds/runMetaAdsSearchJob";
 import { withErrorHandling } from "@/lib/apiHandler";
 import { requireUser } from "@/lib/auth/currentUser";
+import { resolveApiKey } from "@/lib/apiKeys";
 import type { Prisma } from "@/lib/generated/prisma/client";
 import type {
   ApiErrorResponse,
@@ -14,6 +15,8 @@ import type {
 
 export const POST = withErrorHandling(async (request: Request) => {
   const user = await requireUser();
+  // Tell them now, not from the job's log, if there is no SearchAPI.io key to run on.
+  await resolveApiKey("searchApi", user.id);
 
   let body: StartMetaAdsSearchRequest;
   try {
