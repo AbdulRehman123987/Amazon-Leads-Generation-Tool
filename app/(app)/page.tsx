@@ -4,7 +4,9 @@ import { prisma } from "@/lib/db";
 import { requirePageUser } from "@/lib/auth/currentUser";
 import { isAdmin, ownedBy } from "@/lib/auth/access";
 import { summarizeJobInput } from "@/lib/jobSummary";
+import { getTeamStats } from "@/lib/teamStats";
 import { Button } from "@/components/Button";
+import { TeamStats } from "@/components/TeamStats";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ProgressBar } from "@/components/ProgressBar";
 
@@ -47,7 +49,7 @@ export default async function DashboardPage() {
   const scope = ownedBy(user);
   const admin = isAdmin(user);
 
-  const [totalProducts, totalBrands, brandsEnriched, emailsFound, adLibraryBrands, jobsRunning, recentJobs] =
+  const [totalProducts, totalBrands, brandsEnriched, emailsFound, adLibraryBrands, jobsRunning, recentJobs, team] =
     await Promise.all([
       prisma.product.count({ where: scope }),
       prisma.brand.count({ where: scope }),
@@ -61,6 +63,8 @@ export default async function DashboardPage() {
         take: 10,
         include: { user: { select: { email: true } } },
       }),
+      // Only an admin gets the per-person breakdown.
+      admin ? getTeamStats() : null,
     ]);
 
   return (
@@ -90,6 +94,8 @@ export default async function DashboardPage() {
         <StatCard label="Ad Library brands" value={adLibraryBrands} icon={Megaphone} tint="violet" />
         <StatCard label="Jobs running" value={jobsRunning} icon={Activity} tint="rose" />
       </div>
+
+      {team && <TeamStats rows={team} />}
 
       <div className="rounded-2xl border border-slate-200/70 bg-white shadow-sm shadow-slate-200/50">
         <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">

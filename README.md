@@ -212,7 +212,11 @@ the pages and API routes answer 404, exactly as for something that doesn't
 exist.
 
 - **Admin** (`User.role = ADMIN`, stored in the database so every copy of the
-  app agrees) sees everything, with an "Owner" column/tag on each list. The
+  app agrees) sees everything, with an "Owner" column/tag on each list, and the
+  dashboard gets a **Team activity** table (`lib/teamStats.ts`): per person, the
+  searches run, products and brands found, how many brands are Found / Partial /
+  Not found / Pending, how many have an email or were exported, their Ad Library
+  results, and when they were last active. The
   migration made `rehmanmirza458@gmail.com` the admin and gave it all the data
   that existed before accounts owned anything. Change roles with
   `npm run user -- role <email> <admin|member>`; the last admin can't be
